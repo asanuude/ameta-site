@@ -299,13 +299,19 @@
             messagesDiv.scrollTop = messagesDiv.scrollHeight;
 
             try {
-                // Здесь будет интеграция с моим API
-                // Пока просто заглушка с ответом
-                setTimeout(() => {
-                    typingIndicator.remove();
-                    addMessage('Спасибо за вопрос! Я ещё учусь отвечать на такие вопросы. Скоро здесь будет подключён настоящий AI-консультант с данными из 1С.');
-                }, 1500);
-
+                // Отправляем запрос к нашему API
+                const response = await fetch('/api/ask', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ question: text })
+                });
+                
+                const data = await response.json();
+                
+                typingIndicator.remove();
+                addMessage(data.answer);
             } catch (error) {
                 typingIndicator.remove();
                 addMessage('Произошла ошибка. Пожалуйста, попробуйте позже.');
