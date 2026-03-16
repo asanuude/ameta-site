@@ -1,0 +1,7 @@
+{
+  "functions": {
+    "src/pages/api/*.js": {
+      "runtime": "edge@latest"
+    }
+  }
+}
