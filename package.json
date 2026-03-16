@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@astrojs/vercel": "^10.0.0",
-    "astro": "^6.0.4"
+    "astro": "^6.0.4",
+    "xml2js": "^0.6.2"
   }
 }
