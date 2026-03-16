@@ -237,128 +237,137 @@
                 <input 
                     type="text" 
                     id="userInput" 
-                    placeholder="Напишите ваш вопрос..." 
-                    onkeypress="if(event.key === 'Enter') sendMessage()"
+                    placeholder="Напишите ваш вопрос..."
                 >
-                <button class="mic-button" id="micButton" onclick="toggleRecording()">
+                <button class="mic-button" id="micButton">
                     <svg viewBox="0 0 24 24" fill="currentColor">
                         <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/>
                         <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
                     </svg>
                 </button>
             </div>
-            <button class="send-button" onclick="sendMessage()">Отправить</button>
+            <button class="send-button">Отправить</button>
         </div>
     </div>
 
     <script>
-        // Состояние записи
-        let isRecording = false;
-        let mediaRecorder = null;
-        let audioChunks = [];
-        const messagesDiv = document.getElementById('messages');
-        const userInput = document.getElementById('userInput');
-        const micButton = document.getElementById('micButton');
-
-        // Функция добавления сообщения
-        function addMessage(text, isUser = false) {
-            const messageDiv = document.createElement('div');
-            messageDiv.className = `message ${isUser ? 'user-message' : 'bot-message'}`;
+        document.addEventListener('DOMContentLoaded', function() {
+            // Состояние записи
+            let isRecording = false;
+            let mediaRecorder = null;
+            let audioChunks = [];
             
-            // Форматируем ответ (разбиваем на абзацы, если есть списки)
-            const formattedText = text.split('\n').map(line => {
-                if (line.trim().startsWith('-')) {
-                    return `<li>${line.trim().substring(1)}</li>`;
-                } else if (line.trim() !== '') {
-                    return `<p>${line}</p>`;
-                }
-                return '';
-            }).join('');
-            
-            messageDiv.innerHTML = formattedText.includes('<li>') 
-                ? `<ul>${formattedText}</ul>` 
-                : formattedText;
-            
-            messagesDiv.appendChild(messageDiv);
-            messagesDiv.scrollTop = messagesDiv.scrollHeight;
-        }
+            const messagesDiv = document.getElementById('messages');
+            const userInput = document.getElementById('userInput');
+            const micButton = document.getElementById('micButton');
+            const sendButton = document.querySelector('.send-button');
 
-        // Функция отправки сообщения
-        async function sendMessage() {
-            const text = userInput.value.trim();
-            if (!text) return;
-
-            addMessage(text, true);
-            userInput.value = '';
-
-            // Показываем индикатор печати
-            const typingIndicator = document.createElement('div');
-            typingIndicator.className = 'typing-indicator';
-            typingIndicator.innerHTML = '<span></span><span></span><span></span>';
-            messagesDiv.appendChild(typingIndicator);
-            messagesDiv.scrollTop = messagesDiv.scrollHeight;
-
-            try {
-                // Здесь будет интеграция с моим API
-                // Пока просто заглушка с ответом
-                setTimeout(() => {
-                    typingIndicator.remove();
-                    addMessage('Спасибо за вопрос! Я ещё учусь отвечать на такие вопросы. Скоро здесь будет подключён настоящий AI-консультант с данными из 1С.');
-                }, 1500);
-
-            } catch (error) {
-                typingIndicator.remove();
-                addMessage('Произошла ошибка. Пожалуйста, попробуйте позже.');
+            // Функция добавления сообщения
+            function addMessage(text, isUser = false) {
+                const messageDiv = document.createElement('div');
+                messageDiv.className = `message ${isUser ? 'user-message' : 'bot-message'}`;
+                
+                const formattedText = text.split('\n').map(line => {
+                    if (line.trim().startsWith('-')) {
+                        return `<li>${line.trim().substring(1)}</li>`;
+                    } else if (line.trim() !== '') {
+                        return `<p>${line}</p>`;
+                    }
+                    return '';
+                }).join('');
+                
+                messageDiv.innerHTML = formattedText.includes('<li>') 
+                    ? `<ul>${formattedText}</ul>` 
+                    : formattedText;
+                
+                messagesDiv.appendChild(messageDiv);
+                messagesDiv.scrollTop = messagesDiv.scrollHeight;
             }
-        }
 
-        // Функция записи голоса
-        async function toggleRecording() {
-            if (!isRecording) {
+            // Функция отправки сообщения
+            async function sendMessage() {
+                const text = userInput.value.trim();
+                if (!text) return;
+
+                addMessage(text, true);
+                userInput.value = '';
+
+                const typingIndicator = document.createElement('div');
+                typingIndicator.className = 'typing-indicator';
+                typingIndicator.innerHTML = '<span></span><span></span><span></span>';
+                messagesDiv.appendChild(typingIndicator);
+                messagesDiv.scrollTop = messagesDiv.scrollHeight;
+
                 try {
-                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                    mediaRecorder = new MediaRecorder(stream);
-                    audioChunks = [];
-
-                    mediaRecorder.ondataavailable = event => {
-                        audioChunks.push(event.data);
-                    };
-
-                    mediaRecorder.onstop = async () => {
-                        const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
-                        // Здесь будет отправка аудио на API для распознавания
-                        // Пока просто симулируем распознавание
-                        addMessage('🎤 (Голосовое сообщение)', true);
-                        
-                        const typingIndicator = document.createElement('div');
-                        typingIndicator.className = 'typing-indicator';
-                        typingIndicator.innerHTML = '<span></span><span></span><span></span>';
-                        messagesDiv.appendChild(typingIndicator);
-                        
-                        setTimeout(() => {
-                            typingIndicator.remove();
-                            addMessage('Извините, распознавание голоса временно не работает. Пожалуйста, напишите ваш вопрос.');
-                        }, 2000);
-
-                        stream.getTracks().forEach(track => track.stop());
-                    };
-
-                    mediaRecorder.start();
-                    isRecording = true;
-                    micButton.classList.add('listening');
-                    micButton.style.background = '#e53e3e';
+                    const response = await fetch('/api/ask', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ question: text })
+                    });
+                    
+                    const data = await response.json();
+                    typingIndicator.remove();
+                    addMessage(data.answer);
                 } catch (error) {
-                    alert('Не удалось получить доступ к микрофону. Пожалуйста, разрешите доступ и попробуйте снова.');
+                    typingIndicator.remove();
+                    addMessage('Произошла ошибка. Пожалуйста, попробуйте позже.');
                 }
-            } else {
-                if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-                    mediaRecorder.stop();
-                }
-                isRecording = false;
-                micButton.classList.remove('listening');
-                micButton.style.background = '#667eea';
             }
-        }
+
+            // Функция записи голоса
+            async function toggleRecording() {
+                if (!isRecording) {
+                    try {
+                        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                        mediaRecorder = new MediaRecorder(stream);
+                        audioChunks = [];
+
+                        mediaRecorder.ondataavailable = event => {
+                            audioChunks.push(event.data);
+                        };
+
+                        mediaRecorder.onstop = async () => {
+                            addMessage('🎤 (Голосовое сообщение)', true);
+                            
+                            const typingIndicator = document.createElement('div');
+                            typingIndicator.className = 'typing-indicator';
+                            typingIndicator.innerHTML = '<span></span><span></span><span></span>';
+                            messagesDiv.appendChild(typingIndicator);
+                            
+                            setTimeout(() => {
+                                typingIndicator.remove();
+                                addMessage('Извините, распознавание голоса временно не работает. Пожалуйста, напишите ваш вопрос.');
+                            }, 2000);
+
+                            stream.getTracks().forEach(track => track.stop());
+                        };
+
+                        mediaRecorder.start();
+                        isRecording = true;
+                        micButton.classList.add('listening');
+                        micButton.style.background = '#e53e3e';
+                    } catch (error) {
+                        alert('Не удалось получить доступ к микрофону. Пожалуйста, разрешите доступ и попробуйте снова.');
+                    }
+                } else {
+                    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                        mediaRecorder.stop();
+                    }
+                    isRecording = false;
+                    micButton.classList.remove('listening');
+                    micButton.style.background = '#667eea';
+                }
+            }
+
+            // Привязываем события к кнопкам
+            sendButton.addEventListener('click', sendMessage);
+            micButton.addEventListener('click', toggleRecording);
+            userInput.addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    sendMessage();
+                }
+            });
+        });
     </script>
 </body>
 </html>
