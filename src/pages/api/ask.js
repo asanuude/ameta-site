@@ -1,131 +1,114 @@
 export const prerender = false;
 import fs from 'fs';
 import path from 'path';
-import { parseString } from 'xml2js';
 
-// Функция для чтения и парсинга XML-файлов
-async function parseXMLFile(filePath) {
-    const xmlContent = fs.readFileSync(filePath, 'utf8');
-    return new Promise((resolve, reject) => {
-        parseString(xmlContent, (err, result) => {
-            if (err) reject(err);
-            else resolve(result);
-        });
-    });
-}
-
-// Загружаем все данные при старте функции
 let catalog = [];
-let offers = [];
+let lastLoad = 0;
+const CACHE_TTL = 60000; // 60 секунд
 
-async function loadData() {
-    try {
-        // Путь к папке с данными
-        const dataDir = path.join(process.cwd(), 'data');
-        
-        // Загружаем каталоги товаров
-        const import0 = await parseXMLFile(path.join(dataDir, 'import0_1.xml'));
-        const import1 = await parseXMLFile(path.join(dataDir, 'import1_1.xml'));
-        
-        // Загружаем предложения (цены и остатки)
-        const offers0 = await parseXMLFile(path.join(dataDir, 'offers0_1.xml'));
-        const offers1 = await parseXMLFile(path.join(dataDir, 'offers1_1.xml'));
-        
-        // Собираем все товары из каталогов
-        const allProducts = [
-            ...(import0?.КоммерческаяИнформация?.Каталог?.[0]?.Товары?.[0]?.Товар || []),
-            ...(import1?.КоммерческаяИнформация?.Каталог?.[0]?.Товары?.[0]?.Товар || [])
-        ];
-        
-        // Собираем все предложения
-        const allOffers = [
-            ...(offers0?.КоммерческаяИнформация?.ПакетПредложений?.[0]?.Предложения?.[0]?.Предложение || []),
-            ...(offers1?.КоммерческаяИнформация?.ПакетПредложений?.[0]?.Предложения?.[0]?.Предложение || [])
-        ];
-        
-        // Создаем удобную структуру: товар + его цена и остатки
-        catalog = allProducts.map(product => {
-            const offer = allOffers.find(o => o.Ид?.[0] === product.Ид?.[0]);
-            const price = offer?.Цены?.[0]?.Цена?.[0]?.ЦенаЗаЕдиницу?.[0] || 'Цена не указана';
-            const quantity = offer?.Количество?.[0] || 0;
-            
-            return {
-                id: product.Ид?.[0],
-                name: product.Наименование?.[0]?.trim() || '',
-                description: product.Описание?.[0] || '',
-                price: price,
-                quantity: quantity,
-                sku: product.ЗначенияРеквизитов?.[0]?.ЗначениеРеквизита?.find(r => r.Наименование?.[0] === 'Код')?.Значение?.[0]?.trim() || ''
-            };
-        });
-        
-        console.log(`Загружено товаров: ${catalog.length}`);
-    } catch (error) {
-        console.error('Ошибка загрузки данных:', error);
+// Функция загрузки каталога
+function loadCatalog() {
+    const now = Date.now();
+    if (now - lastLoad < CACHE_TTL && catalog.length > 0) {
+        return catalog;
     }
+
+    try {
+        // Сначала пробуем из /tmp (самые свежие)
+        const tmpPath = path.join('/tmp', 'catalog.json');
+        if (fs.existsSync(tmpPath)) {
+            catalog = JSON.parse(fs.readFileSync(tmpPath, 'utf8'));
+        } else {
+            // Если нет, берём из проекта
+            const projectPath = path.join(process.cwd(), 'data', 'catalog.json');
+            if (fs.existsSync(projectPath)) {
+                catalog = JSON.parse(fs.readFileSync(projectPath, 'utf8'));
+            }
+        }
+        lastLoad = now;
+        console.log(`Loaded ${catalog.length} products`);
+    } catch (error) {
+        console.error('Error loading catalog:', error);
+    }
+    return catalog;
 }
 
-// Загружаем данные при инициализации
-loadData();
-
-export async function OPTIONS() {
-    return new Response(null, {
-        status: 204,
-        headers: {
-            'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Methods': 'POST, OPTIONS',
-            'Access-Control-Allow-Headers': 'Content-Type'
+// Улучшенный поиск с синонимами
+function searchProducts(query, products) {
+    const lowerQuery = query.toLowerCase();
+    const words = lowerQuery.split(' ').filter(w => w.length > 1);
+    
+    // Расширяем запрос синонимами
+    const searchTerms = new Set(words);
+    
+    words.forEach(word => {
+        if (word.includes('касс') || word.includes('ккм')) {
+            searchTerms.add('ккм'); searchTerms.add('фр'); 
+            searchTerms.add('фискальный'); searchTerms.add('регистратор');
+        }
+        if (word.includes('вес')) {
+            searchTerms.add('весы'); searchTerms.add('вэт'); 
+            searchTerms.add('вр'); searchTerms.add('мк');
+        }
+        if (word.includes('принтер') || word.includes('печат')) {
+            searchTerms.add('принтер'); searchTerms.add('фр');
+            searchTerms.add('fprint'); searchTerms.add('печати');
+        }
+        if (word.includes('комп') || word.includes('pos')) {
+            searchTerms.add('pos'); searchTerms.add('компьютер');
+            searchTerms.add('моноблок'); searchTerms.add('терминал');
         }
     });
+
+    const results = products.filter(p => {
+        const name = p.name.toLowerCase();
+        const desc = (p.description || '').toLowerCase();
+        const sku = (p.sku || '').toLowerCase();
+        
+        return Array.from(searchTerms).some(term => 
+            name.includes(term) || desc.includes(term) || sku.includes(term)
+        );
+    });
+
+    return results;
 }
 
 export async function POST({ request }) {
     try {
         const { question } = await request.json();
-        const lowerQuestion = question.toLowerCase();
+        const products = loadCatalog();
         
-        // Ищем товары по ключевым словам в названии
-        const results = catalog.filter(product => {
-            const name = product.name.toLowerCase();
-            return lowerQuestion.split(' ').some(word => 
-                word.length > 2 && name.includes(word)
-            );
-        });
-        
+        // Специальная обработка приветствия
+        if (question.toLowerCase().includes('привет')) {
+            const categories = [
+                'POS-системы', 'весы', 'кассовые аппараты (ККМ)', 
+                'терминалы', 'комплектующие'
+            ];
+            return new Response(JSON.stringify({ 
+                answer: `Здравствуйте! Я AI-консультант. Могу помочь с подбором товаров.\n\nВ нашем каталоге есть: ${categories.join(', ')}.\nЧто именно вас интересует?`
+            }), { status: 200 });
+        }
+
+        const results = searchProducts(question, products);
+
         let answer = '';
-        
         if (results.length === 0) {
-            // Если ничего не нашли — предлагаем уточнить
-            answer = 'Извините, я не нашёл товаров по вашему запросу. Уточните, пожалуйста, что именно вас интересует (например, "POS-система", "весы", "процессор")?';
+            answer = 'Извините, не нашёл таких товаров. Попробуйте спросить иначе или уточните категорию (POS-системы, весы, ККМ).';
         } else if (results.length === 1) {
-            // Нашли один товар — показываем подробно
             const p = results[0];
             answer = `${p.name}\n💰 Цена: ${p.price} руб.\n📦 Наличие: ${p.quantity > 0 ? 'есть' : 'нет'} на складе\n📝 ${p.description || 'Описание отсутствует'}`;
         } else {
-            // Нашли несколько — показываем список
-            answer = 'Я нашёл несколько товаров:\n\n' + 
+            answer = 'Нашёл несколько вариантов:\n\n' + 
                 results.slice(0, 5).map((p, i) => 
                     `${i+1}. ${p.name} — ${p.price} руб. (${p.quantity > 0 ? 'в наличии' : 'под заказ'})`
                 ).join('\n') + 
                 '\n\nУточните, какой именно товар вас интересует?';
         }
-        
-        return new Response(JSON.stringify({ answer }), {
-            status: 200,
-            headers: {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*'
-            }
-        });
+
+        return new Response(JSON.stringify({ answer }), { status: 200 });
     } catch (error) {
-        return new Response(JSON.stringify({
-            answer: 'Извините, произошла ошибка. Попробуйте ещё раз.'
-        }), {
-            status: 200,
-            headers: {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*'
-            }
-        });
+        return new Response(JSON.stringify({ 
+            answer: 'Извините, произошла ошибка. Попробуйте ещё раз.' 
+        }), { status: 200 });
     }
 }
