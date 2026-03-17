@@ -14,6 +14,7 @@ export default async function handler(req, res) {
         const GITHUB_OWNER = 'asanuude';
         const GITHUB_REPO = '1c-data';
         const GITHUB_BRANCH = 'main';
+        const GITHUB_TOKEN = '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';
         
         const files = [
             'import0_1.xml',
@@ -30,7 +31,11 @@ export default async function handler(req, res) {
         for (const file of files) {
             try {
                 const url = `https://raw.githubusercontent.com/${GITHUB_OWNER}/${GITHUB_REPO}/${GITHUB_BRANCH}/${file}`;
-                const response = await fetch(url);
+                const response = await fetch(url, {
+                    headers: {
+                        'Authorization': `token ${GITHUB_TOKEN}`
+                    }
+                });
                 
                 if (response.ok) {
                     loadedFiles++;
