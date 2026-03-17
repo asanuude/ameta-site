@@ -1,3 +1,5 @@
+import { parseString } from 'xml2js';
+
 export default async function handler(req, res) {
     // Разрешаем CORS
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -10,7 +12,7 @@ export default async function handler(req, res) {
     try {
         const { question } = req.body;
         
-        // 1. Загружаем данные с GitHub
+        // Настройки GitHub
         const GITHUB_OWNER = 'asanuude';
         const GITHUB_REPO = '1c-data';
         const GITHUB_BRANCH = 'main';
@@ -25,7 +27,18 @@ export default async function handler(req, res) {
             'offers2_1.xml'
         ];
         
-        let loadedFiles = 0;
+        // Функция для парсинга XML
+        function parseXMLString(xmlString) {
+            return new Promise((resolve, reject) => {
+                parseString(xmlString, (err, result) => {
+                    if (err) reject(err);
+                    else resolve(result);
+                });
+            });
+        }
+        
+        let allProducts = [];
+        let allOffers = [];
         let errors = [];
         
         for (const file of files) {
@@ -37,19 +50,67 @@ export default async function handler(req, res) {
                     }
                 });
                 
-                if (response.ok) {
-                    loadedFiles++;
-                } else {
-                    errors.push(`${file}: ${response.status}`);
+                if (!response.ok) {
+                    errors.push(`${file}: HTTP ${response.status}`);
+                    continue;
                 }
+                
+                const xmlText = await response.text();
+                const parsed = await parseXMLString(xmlText);
+                
+                if (file.startsWith('import')) {
+                    const products = parsed?.КоммерческаяИнформация?.Каталог?.[0]?.Товары?.[0]?.Товар || [];
+                    allProducts = [...allProducts, ...products];
+                } else if (file.startsWith('offers')) {
+                    const offers = parsed?.КоммерческаяИнформация?.ПакетПредложений?.[0]?.Предложения?.[0]?.Предложение || [];
+                    allOffers = [...allOffers, ...offers];
+                }
+                
             } catch (e) {
                 errors.push(`${file}: ${e.message}`);
             }
         }
         
-        // Возвращаем отчёт о загрузке
+        // Формируем каталог товаров
+        const catalog = allProducts.map(product => {
+            const offer = allOffers.find(o => o.Ид?.[0] === product.Ид?.[0]);
+            
+            // Считаем общее количество по всем складам
+            let totalQuantity = 0;
+            if (offer?.Склад) {
+                offer.Склад.forEach(sklad => {
+                    totalQuantity += Number(sklad.$.КоличествоНаСкладе || 0);
+                });
+            }
+            
+            // Получаем цену
+            let price = 'Цена не указана';
+            if (offer?.Цены?.[0]?.Цена?.[0]?.ЦенаЗаЕдиницу?.[0]) {
+                price = offer.Цены[0].Цена[0].ЦенаЗаЕдиницу[0];
+            }
+            
+            // Получаем артикул
+            let sku = '';
+            const requisites = product.ЗначенияРеквизитов?.[0]?.ЗначениеРеквизита || [];
+            const skuRequisite = requisites.find(r => r.Наименование?.[0] === 'Код');
+            if (skuRequisite) {
+                sku = skuRequisite.Значение?.[0]?.trim() || '';
+            }
+            
+            return {
+                id: product.Ид?.[0],
+                name: product.Наименование?.[0]?.trim() || '',
+                description: product.Описание?.[0] || '',
+                price: price,
+                quantity: totalQuantity,
+                sku: sku
+            };
+        });
+        
+        // Возвращаем статистику
         return res.status(200).json({ 
-            answer: `Загружено файлов: ${loadedFiles} из ${files.length}`,
+            answer: `Загружено товаров: ${catalog.length}`,
+            products: catalog.slice(0, 3), // покажем первые 3 для проверки
             errors: errors.length ? errors : 'нет ошибок',
             question: question
         });
