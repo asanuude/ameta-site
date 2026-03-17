@@ -10,9 +10,43 @@ export default async function handler(req, res) {
     try {
         const { question } = req.body;
         
-        // Простейший ответ
+        // 1. Загружаем данные с GitHub
+        const GITHUB_OWNER = 'asanuude';
+        const GITHUB_REPO = '1c-data';
+        const GITHUB_BRANCH = 'main';
+        
+        const files = [
+            'import0_1.xml',
+            'import1_1.xml',
+            'import2_1.xml',
+            'offers0_1.xml',
+            'offers1_1.xml',
+            'offers2_1.xml'
+        ];
+        
+        let loadedFiles = 0;
+        let errors = [];
+        
+        for (const file of files) {
+            try {
+                const url = `https://raw.githubusercontent.com/${GITHUB_OWNER}/${GITHUB_REPO}/${GITHUB_BRANCH}/${file}`;
+                const response = await fetch(url);
+                
+                if (response.ok) {
+                    loadedFiles++;
+                } else {
+                    errors.push(`${file}: ${response.status}`);
+                }
+            } catch (e) {
+                errors.push(`${file}: ${e.message}`);
+            }
+        }
+        
+        // Возвращаем отчёт о загрузке
         return res.status(200).json({ 
-            answer: `Вы спросили: "${question}". Функция работает!` 
+            answer: `Загружено файлов: ${loadedFiles} из ${files.length}`,
+            errors: errors.length ? errors : 'нет ошибок',
+            question: question
         });
         
     } catch (error) {
