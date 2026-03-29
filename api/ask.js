@@ -140,11 +140,18 @@ function stripPastedAssistantCatalogLine(text) {
         .trim();
 }
 
+/** Закрытие количества без \b: в JS \b не работает после кириллицы («1 штуку» не срезалось). */
+const QTY_END = '(?=\\s|$|[.,;!?…])';
+
 /** Убирает «1 шт.», «3 штуки» и т.п. из запроса */
 function stripQuantityPhrases(text) {
+    const bareQty = new RegExp(
+        `(?:^|[\\s,;])\\d+\\s*(?:шт\\.?|штук(?:и|а|у)?|pcs?)${QTY_END}`,
+        'gi'
+    );
     return String(text || '')
         .replace(/\(\s*\d+\s*(?:шт\.?|штук(?:и|а|у)?|pcs?)\s*\)/gi, ' ')
-        .replace(/\b\d+\s*(?:шт\.?|штук(?:и|а|у)?|pcs?)\b/gi, ' ')
+        .replace(bareQty, ' ')
         .replace(/\([\s.]*\)/g, ' ')
         .replace(/^\d+\s+/, '')
         .replace(/\s+/g, ' ')
@@ -186,7 +193,9 @@ function stripCatalogNoise(text) {
 
 /** Количество из фразы «… 2 шт.» */
 function extractQuantityFromText(text) {
-    const m = String(text || '').match(/(\d+)\s*(?:шт\.?|штук(?:и|а|у)?)\b/i);
+    const m = String(text || '').match(
+        new RegExp(`(\\d+)\\s*(?:шт\\.?|штук(?:и|а|у)?)${QTY_END}`, 'i')
+    );
     if (!m) return 1;
     const n = parseInt(m[1], 10);
     if (!Number.isFinite(n)) return 1;
