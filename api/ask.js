@@ -1,6 +1,11 @@
 // Конфигурация через переменные окружения (Vercel → Settings → Environment Variables).
 // Локально: скопируйте .env.example → .env.local и заполните.
 
+import { sendInvoiceRequestTo1C } from './lib/invoice-1c.js';
+
+const MANAGER_CONTACT =
+    '\n📞 Телефон: +7 (3012) 333-000\n📧 Email: sales@ameta.online';
+
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || '';
 const OPENROUTER_URL =
     process.env.OPENROUTER_URL || 'https://openrouter.ai/api/v1/chat/completions';
@@ -66,6 +71,14 @@ function isInStock(p) {
     if (typeof raw === 'string' && /не указан/i.test(raw)) return false;
     const pr = typeof raw === 'number' ? raw : parseFloat(String(raw).replace(/\s/g, '').replace(',', '.'));
     return Number.isFinite(pr) && pr > 0;
+}
+
+function cartLineTotal(item) {
+    const p =
+        typeof item.price === 'number'
+            ? item.price
+            : parseFloat(String(item.price).replace(/\s/g, '').replace(',', '.')) || 0;
+    return p * (item.quantity || 1);
 }
 
 // Функция для получения случайных товаров (резервный вариант)
@@ -275,15 +288,35 @@ export default async function handler(req, res) {
             
             let answer;
             if (cart.items.length > 0) {
-                const itemsList = cart.items.map(item => 
-                    `- ${item.name} (${item.quantity} шт.) — ${item.price * item.quantity} руб.`
-                ).join('\n');
-                const total = cart.items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-                
-                answer = `**Ваш заказ:**\n\n${itemsList}\n\n**Итого: ${total} руб.**\n\n` +
-                    `⚠️ Функция автоматического выставления счетов в 1С находится в разработке.\n` +
-                    `Пожалуйста, свяжитесь с менеджером для оформления заказа.\n\n` +
-                    `📞 Телефон: +7 (3012) 333-000\n📧 Email: sales@ameta.online`;
+                const itemsList = cart.items
+                    .map(
+                        (item) =>
+                            `- ${item.name} (${item.quantity} шт.) — ${cartLineTotal(item)} руб.`
+                    )
+                    .join('\n');
+                const total = cart.items.reduce((sum, item) => sum + cartLineTotal(item), 0);
+
+                const onec = await sendInvoiceRequestTo1C({
+                    sessionId,
+                    items: cart.items,
+                });
+
+                let invoiceBlock = '';
+                if (!onec.configured) {
+                    invoiceBlock =
+                        `\n\n⚠️ Автовыставление счёта в 1С **не подключено**: задайте в Vercel переменные **ONEC_INVOICE_WEBHOOK_URL** и **ONEC_INVOICE_WEBHOOK_SECRET** (см. `.env.example`).`;
+                } else if (onec.ok) {
+                    const num = onec.invoiceNumber ? `**№ ${onec.invoiceNumber}**` : 'создан';
+                    const link = onec.documentUrl ? `\nСсылка: ${onec.documentUrl}` : '';
+                    invoiceBlock = `\n\n✅ Счёт в 1С ${num}.${link}`;
+                } else {
+                    invoiceBlock = `\n\n⚠️ 1С не создала счёт автоматически: ${onec.error}`;
+                }
+
+                answer =
+                    `**Ваш заказ:**\n\n${itemsList}\n\n**Итого: ${total} руб.**` +
+                    invoiceBlock +
+                    `\n\nПри необходимости оформления или уточнений свяжитесь с менеджером.${MANAGER_CONTACT}`;
             } else {
                 answer = `Я вижу, вы хотите оформить заказ. Чтобы выписать счёт, сначала добавьте товары в корзину.\n\n` +
                     `Например, спросите:\n` +
@@ -329,16 +362,18 @@ export default async function handler(req, res) {
                     existing.quantity++;
                 } else {
                     cart.items.push({
+                        id: product.id || '',
+                        sku: product.sku || '',
                         name: product.name,
                         price: product.price,
-                        quantity: 1
+                        quantity: 1,
                     });
                 }
                 cart.timestamp = Date.now();
                 
                 const answer = `✅ **${product.name}** добавлен в корзину.\n` +
                     `Цена: ${product.price} руб.\n\n` +
-                    `В корзине сейчас ${cart.items.length} товаров на сумму ${cart.items.reduce((sum, item) => sum + (item.price * item.quantity), 0)} руб.\n\n` +
+                    `В корзине сейчас ${cart.items.length} товаров на сумму ${cart.items.reduce((sum, item) => sum + cartLineTotal(item), 0)} руб.\n\n` +
                     `Чтобы оформить заказ, напишите "выпиши счёт".`;
                 
                 session.messages.push({ role: 'user', content: question });
@@ -368,7 +403,7 @@ export default async function handler(req, res) {
                 const itemsList = cart.items.map(item => 
                     `- ${item.name} — ${item.price} руб. (${item.quantity} шт.)`
                 ).join('\n');
-                const total = cart.items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+                const total = cart.items.reduce((sum, item) => sum + cartLineTotal(item), 0);
                 
                 answer = `**Ваша корзина:**\n\n${itemsList}\n\n**Итого: ${total} руб.**\n\n` +
                     `Если хотите оформить заказ, напишите "выпиши счёт".`;
