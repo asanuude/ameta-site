@@ -216,16 +216,32 @@ function formatInvoiceLinksBlock(onec) {
     const parts = [];
     const pdf = (onec.pdfUrl || onec.documentUrl || '').trim();
     const view = (onec.viewUrl || '').trim();
-    if (view && /^https?:\/\//i.test(view)) {
-        parts.push(`[Открыть в браузере](${view})`);
+    if (view) {
+        if (/^https?:\/\//i.test(view)) {
+            parts.push(`[Открыть в браузере](${view})`);
+        } else {
+            parts.push(
+                `Навигационная ссылка 1С (часто открывается из **того же** веб-клиента базы):\n\`${view}\``
+            );
+        }
     }
     if (pdf && /^https?:\/\//i.test(pdf)) {
         parts.push(`[Скачать PDF счёта](${pdf})`);
     } else if (view && /^https?:\/\//i.test(view) && /\.pdf(\?|$)/i.test(view)) {
         parts.push(`[Скачать PDF счёта](${view})`);
     }
+    const oid = (onec.orderId || '').trim();
+    const iid = (onec.invoiceId || '').trim();
+    if (oid) {
+        parts.push(`УИД заказа (для поиска в 1С): \`${escapeHtml(oid)}\``);
+    }
+    if (iid) {
+        parts.push(`УИД счёта на оплату: \`${escapeHtml(iid)}\``);
+    }
     if (parts.length === 0) {
-        parts.push('PDF в ответе нет — счёт уточнит менеджер.');
+        parts.push(
+            'Прямой PDF в ответе 1С пока не отдаётся — документы смотрите в 1С по номеру или попросите PDF у менеджера.'
+        );
     }
     return `\n\n${parts.join('\n')}`;
 }
@@ -572,9 +588,12 @@ export default async function handler(req, res) {
             if (!onec.configured) {
                 mid = `\n\n⚠️ Вебхук 1С не настроен в Vercel (**ONEC_INVOICE_WEBHOOK_***).`;
             } else if (onec.ok) {
-                const ord = onec.orderNumber ? ` Заказ: **${escapeHtml(onec.orderNumber)}**.` : '';
+                const ord = onec.orderNumber ? ` **Заказ клиента № ${escapeHtml(onec.orderNumber)}**.` : '';
+                const inv = onec.invoiceNumber
+                    ? ` **Счёт на оплату № ${escapeHtml(onec.invoiceNumber)}**.`
+                    : ' Счёт на оплату создан или совпадает с номером заказа.';
                 mid =
-                    `\n\n✅ В 1С оформлено.${ord} Счёт: ${onec.invoiceNumber ? `**№ ${escapeHtml(onec.invoiceNumber)}**` : 'создан'}.` +
+                    `\n\n✅ В базе 1С созданы документы.${ord}${inv}` +
                     formatInvoiceLinksBlock(onec);
             } else {
                 mid = `\n\n⚠️ **1С:** ${escapeHtml(onec.error || 'ошибка')}`;

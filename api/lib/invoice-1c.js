@@ -104,6 +104,8 @@ export async function sendInvoiceRequestTo1C({ sessionId, items, counterparty })
         const invoiceNumber =
             data.invoiceNumber ?? data.number ?? data.Номер ?? data.invoice ?? '';
         const orderNumber = data.orderNumber ?? data.order ?? data.Заказ ?? '';
+        const orderId = String(data.orderId ?? data.orderUuid ?? data.orderGUID ?? '');
+        const invoiceId = String(data.invoiceId ?? data.invoiceUuid ?? '');
         const pdfUrl = String(data.pdfUrl ?? data.pdf ?? data.PdfUrl ?? '');
         const viewUrl = String(data.viewUrl ?? data.browserUrl ?? data.printUrl ?? '');
         const documentUrl = String(data.url ?? data.href ?? data.link ?? '');
@@ -113,6 +115,8 @@ export async function sendInvoiceRequestTo1C({ sessionId, items, counterparty })
             ok: true,
             invoiceNumber: String(invoiceNumber || ''),
             orderNumber: String(orderNumber || ''),
+            orderId,
+            invoiceId,
             pdfUrl,
             viewUrl,
             documentUrl,
