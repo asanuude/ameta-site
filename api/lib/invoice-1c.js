@@ -4,6 +4,10 @@
  * Ожидаемый контракт (на стороне 1С вы реализуете сами):
  *   POST JSON: {
  *     sessionId, source, createdAt,
+ *     organization — наименование организации-продавца в 1С (обязательно для /ameta/invoice),
+ *     contract — опционально наименование договора; иначе берётся первый договор КА+организация,
+ *     create_counterparty_if_missing — опционально (по умолчанию true на стороне 1С),
+ *     post_document — опционально, провести заказ (bool),
  *     counterparty: { organizationName, inn },
  *     items: [{ nomenclatureId, sku, name, quantity, price }]
  *   }
@@ -27,10 +31,33 @@ export async function sendInvoiceRequestTo1C({ sessionId, items, counterparty })
         return { configured: false };
     }
 
+    const organization = (process.env.AMETA_1C_ORGANIZATION_NAME || '').trim();
+    const urlNeedsSellerOrg = /ameta\/invoice/i.test(url);
+    if (urlNeedsSellerOrg && !organization) {
+        return {
+            configured: true,
+            ok: false,
+            error: 'Задайте AMETA_1C_ORGANIZATION_NAME (наименование организации-продавца в 1С, как в справочнике Организации).',
+        };
+    }
+    const contract = (process.env.AMETA_1C_CONTRACT_NAME || '').trim();
+    const postDocument =
+        String(process.env.AMETA_1C_POST_ORDER || '').toLowerCase() === 'true' ||
+        String(process.env.AMETA_1C_POST_ORDER || '').trim() === '1';
+    const createCounterparty =
+        process.env.AMETA_1C_CREATE_COUNTERPARTY === undefined ||
+        process.env.AMETA_1C_CREATE_COUNTERPARTY === '' ||
+        String(process.env.AMETA_1C_CREATE_COUNTERPARTY).toLowerCase() === 'true' ||
+        String(process.env.AMETA_1C_CREATE_COUNTERPARTY).trim() === '1';
+
     const payload = {
         sessionId,
         source: 'ameta-site',
         createdAt: new Date().toISOString(),
+        ...(organization ? { organization } : {}), // обязательно для …/hs/agent/ameta/invoice
+        ...(contract ? { contract } : {}),
+        create_counterparty_if_missing: createCounterparty,
+        ...(postDocument ? { post_document: true } : {}),
         counterparty: {
             organizationName: counterparty?.organizationName || '',
             inn: counterparty?.inn || '',
