@@ -4,6 +4,13 @@
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || '';
 const OPENROUTER_URL =
     process.env.OPENROUTER_URL || 'https://openrouter.ai/api/v1/chat/completions';
+/** Список моделей: https://openrouter.ai/models — не используем openrouter/free (нестабильно на длинном каталоге). */
+const OPENROUTER_MODEL =
+    process.env.OPENROUTER_MODEL || 'openai/gpt-4o-mini';
+const OPENROUTER_MAX_TOKENS = Math.min(
+    8192,
+    Math.max(256, parseInt(process.env.OPENROUTER_MAX_TOKENS || '2048', 10) || 2048)
+);
 const SITE_URL =
     process.env.SITE_URL ||
     (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'https://ameta.online');
@@ -459,7 +466,7 @@ export default async function handler(req, res) {
                     'HTTP-Referer': SITE_URL
                 },
                 body: JSON.stringify({
-                    model: 'openrouter/free',
+                    model: OPENROUTER_MODEL,
                     messages: [
                         { role: 'system', content: systemPrompt },
                         ...recentMessages,
@@ -468,8 +475,8 @@ export default async function handler(req, res) {
                             content: `Данные каталога для этого запроса (режим: ${catalogSource}; всего в наличии в базе ~${inStockProducts.length} позиций; в сообщении до ${CATALOG_AI_MAX_ITEMS} строк):\n\n${catalogContext}\n\nВопрос клиента: "${question}"\n\nОтветь только по строкам выше. Если список пуст или не подходит — не выдумывай товары, предложи уточнить запрос или связаться с менеджером.`
                         }
                     ],
-                    temperature: 0.5,
-                    max_tokens: 1000
+                    temperature: 0.4,
+                    max_tokens: OPENROUTER_MAX_TOKENS
                 })
             });
             
