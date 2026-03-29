@@ -263,6 +263,21 @@ const CATALOG_QUERY_HINTS = [
         keys: ['мясоруб']
     },
     {
+        test: /холодиль|морозиль|рефриж|ларь|лари|ледоген|фризер|freezer|холодн.*шкаф|шкаф.*холод/i,
+        keys: [
+            'холодиль',
+            'морозиль',
+            'рефриж',
+            'морозил',
+            'ларь',
+            'холодн',
+            'морозн',
+            'ледоген',
+            'фризер',
+            'freezer',
+        ]
+    },
+    {
         test: /моноблок|pos[\s-]?комп|кассовый комп/i,
         keys: ['моноблок', 'pos', 'кассов', 'комп']
     }
@@ -273,9 +288,34 @@ const CATALOG_AI_MAX_ITEMS = Math.min(
     Math.max(200, parseInt(process.env.ASK_CATALOG_MAX_ITEMS || '400', 10) || 400)
 );
 
+/** Имя в строке каталога для ИИ: не ломать разделитель « | Цена: » */
+function sanitizeCatalogNameForAI(name) {
+    return String(name || '')
+        .replace(/\|/g, '¦')
+        .replace(/\r?\n/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+/** Если точное слово не встречается в названиях (мн. ч.), пробуем короче */
+function expandSearchTokens(tokens) {
+    const out = new Set();
+    for (const t of tokens) {
+        if (t.length < 3) continue;
+        out.add(t);
+        if (t.length >= 8) {
+            out.add(t.slice(0, -1));
+            out.add(t.slice(0, -2));
+        } else if (t.length >= 6) {
+            out.add(t.slice(0, -1));
+        }
+    }
+    return [...out];
+}
+
 /**
  * Подмножество каталога под конкретный вопрос; иначе срез с начала (как раньше).
- * @returns {{ products: object[], source: 'filtered'|'tokens'|'head'|'empty-filter' }}
+ * @returns {{ products: object[], source: 'filtered'|'tokens'|'head' }}
  */
 function selectProductsForConsultant(question, inStockProducts) {
     const q = (question || '').toLowerCase();
@@ -290,7 +330,7 @@ function selectProductsForConsultant(question, inStockProducts) {
             if (hit.length > 0) {
                 return { products: hit.slice(0, CATALOG_AI_MAX_ITEMS), source: 'filtered' };
             }
-            return { products: [], source: 'empty-filter' };
+            break;
         }
     }
 
@@ -329,10 +369,13 @@ function selectProductsForConsultant(question, inStockProducts) {
         .filter((t) => t.length >= 3 && !stop.has(t));
 
     if (tokens.length > 0) {
-        const hit = inStockProducts.filter((p) => {
-            const n = (p.name || '').toLowerCase();
-            return tokens.some((t) => n.includes(t));
-        });
+        const tryTokens = (toks) =>
+            inStockProducts.filter((p) => {
+                const n = (p.name || '').toLowerCase();
+                return toks.some((t) => n.includes(t));
+            });
+        let hit = tryTokens(tokens);
+        if (hit.length === 0) hit = tryTokens(expandSearchTokens(tokens));
         if (hit.length > 0) {
             return { products: hit.slice(0, CATALOG_AI_MAX_ITEMS), source: 'tokens' };
         }
@@ -432,6 +475,22 @@ export default async function handler(req, res) {
             session.messages.push({ role: 'assistant', content: text });
             return res.status(200).json({ answer: text });
         };
+
+        const tq = question.trim();
+        if (tq.length <= 70) {
+            const onlySmallTalk =
+                /^(привет|здравствуй|здравствуйте|добрый(\s+(день|вечер|утро))?)[!.?\s]*$/iu.test(
+                    tq
+                ) ||
+                /^как\s+дела[!.?\s]*$/iu.test(tq) ||
+                /^что\s+нового[!.?\s]*$/iu.test(tq) ||
+                /^как\s+поживаете[!.?\s]*$/iu.test(tq);
+            if (onlySmallTalk) {
+                return pushAndReturn(
+                    'Здравствуйте. По наличию и подбору оборудования напишите, что нужно — например: «сканеры штрихкода», «холодильники в наличии».'
+                );
+            }
+        }
 
         // Отмена пошагового счёта
         const cartExisting = shoppingCarts.has(sessionId) ? shoppingCarts.get(sessionId) : null;
@@ -655,10 +714,11 @@ export default async function handler(req, res) {
         // 4️⃣ СИСТЕМНЫЙ ПРОМПТ
         const systemPrompt = `Ты — консультант AMETA (торговое и кухонное оборудование, кассы, весы, холод, склад).
 
-ФОРМАТ ОТВЕТА: 2–6 коротких предложений + нумерованный список товаров (название, цена, кол-во). Без длинных вступлений, без повторов. Контакты менеджера — только если клиент явно просит счёт/доставку/оплату или список пуст.
-После списка одна строка: для счёта — «счёт на [точное название из списка]» или «добавь [название] в корзину».
-
-КАТАЛОГ: только строки из переданного списка, те же названия/цены/остатки. Не придумывай модели и цены. Если списка нет или не подходит — скажи кратко и предложи уточнить запрос.`;
+ФОРМАТ: 1–2 коротких предложения + нумерованный список. В каждой позиции **полное наименование** из каталога (как в строке до « | Цена:»), цена и остаток — **точно как в строке**. Не обрывай название на скобке «(» или на «2D |». Символ ¦ в названии заменяет вертикальную черту.
+Не пиши общих фраз вроде «у нас всё хорошо» или выдуманных новостей компании.
+Если в списке нет подходящих позиций — одна фраза: в этой выборке нет, предложи уточнить тип/бренд; не утверждай, что товара нет во всём магазине.
+Контакты менеджера — только по запросу счёта/доставки или если список пуст.
+После списка одна строка: счёт — «счёт на [точное название]» или «добавь [название] в корзину».`;
 
         // 5️⃣ ОПРЕДЕЛЯЕМ, ЭТО ЗАПРОС ПОМОЩИ
         // Без сырого «что есть» — иначе срабатывает на «что есть в наличии до … руб»
@@ -705,10 +765,10 @@ export default async function handler(req, res) {
         const catalogContext =
             productsForAI.length > 0
                 ? productsForAI
-                      .map(
-                          (p) =>
-                              `- ${p.name} | Цена: ${p.price} руб. | В наличии: ${p.quantity} шт.`
-                      )
+                      .map((p) => {
+                          const nm = sanitizeCatalogNameForAI(p.name);
+                          return `- ${nm} | Цена: ${p.price} руб. | В наличии: ${p.quantity} шт.`;
+                      })
                       .join('\n')
                 : '(список пуст — под запрос не найдено позиций в наличии в каталоге)';
         
@@ -738,7 +798,7 @@ export default async function handler(req, res) {
                         ...recentMessages,
                         {
                             role: 'user',
-                            content: `Каталог (режим ${catalogSource}, в базе ~${inStockProducts.length} позиций, здесь до ${CATALOG_AI_MAX_ITEMS} строк):\n\n${catalogContext}\n\nВопрос: "${question}"\n\nОтветь кратко, только по этим строкам.`
+                            content: `Каталог (режим ${catalogSource}, в базе ~${inStockProducts.length} позиций, здесь до ${CATALOG_AI_MAX_ITEMS} строк). Копируй наименование целиком до « | Цена:».\n\n${catalogContext}\n\nВопрос: "${question}"\n\nОтветь только по этим строкам.`
                         }
                     ],
                     temperature: 0.25,
