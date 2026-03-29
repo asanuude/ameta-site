@@ -261,9 +261,15 @@ function parseNumberedCatalogLinesFromAssistant(content) {
 /**
  * Позиция для счёта: текущая фраза, пункт списка из последнего ответа ассистента, предыдущие реплики пользователя.
  */
-function findProductForInvoice(session, question, inStockProducts) {
+function findProductForInvoice(session, question, inStockProducts, clientProductHint = '') {
     let g = findBestCatalogMatch(question, inStockProducts);
     if (g) return g;
+
+    const hint = String(clientProductHint || '').trim();
+    if (hint.length >= 8) {
+        g = findBestCatalogMatch(hint, inStockProducts);
+        if (g) return g;
+    }
 
     const q = String(question || '').trim();
     const numHead = q.match(/^\s*(\d+)\.\s+/);
@@ -561,7 +567,7 @@ export default async function handler(req, res) {
     }
 
     try {
-        const { question, sessionId = 'default' } = req.body;
+        const { question, sessionId = 'default', lastUserProductQuery = '' } = req.body;
         
         console.log('🔍 ПОЛУЧЕН ЗАПРОС:', JSON.stringify({ question, sessionId }));
         
@@ -706,7 +712,12 @@ export default async function handler(req, res) {
             const inStock = products.filter(isInStock);
 
             if (cart.items.length === 0) {
-                const guessed = findProductForInvoice(session, question, inStock);
+                const guessed = findProductForInvoice(
+                    session,
+                    question,
+                    inStock,
+                    lastUserProductQuery
+                );
                 if (guessed) {
                     const qty = extractQuantityFromText(question);
                     cart.items = [

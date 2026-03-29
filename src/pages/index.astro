@@ -428,6 +428,7 @@ import SpeedInsights from "@vercel/speed-insights/astro";
             const sendButton = document.getElementById('sendButton');
 
             const SESSION_KEY = 'ameta_session_id';
+            const LAST_USER_Q_KEY = 'ameta_last_user_query_for_invoice';
             let sessionId = localStorage.getItem(SESSION_KEY);
             if (!sessionId) {
                 sessionId = crypto.randomUUID();
@@ -481,15 +482,32 @@ import SpeedInsights from "@vercel/speed-insights/astro";
                 messagesDiv.scrollTop = messagesDiv.scrollHeight;
 
                 try {
+                    const lastUserProductQuery =
+                        localStorage.getItem(LAST_USER_Q_KEY) || '';
                     const response = await fetch('/api/ask', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ question: text, sessionId })
+                        body: JSON.stringify({
+                            question: text,
+                            sessionId,
+                            lastUserProductQuery,
+                        }),
                     });
-                    
+
                     const data = await response.json();
                     typingIndicator.remove();
                     addMessage(data.answer || 'Пустой ответ от сервера');
+
+                    const t = text;
+                    const short = t.length <= 52;
+                    const looksLikeBareInvoice =
+                        short &&
+                        /(?:сч[её]т|счет)/iu.test(t) &&
+                        !t.includes('|') &&
+                        !/\sна\s+\S{4,}/iu.test(t);
+                    if (!looksLikeBareInvoice && t.length >= 8 && t.length <= 900) {
+                        localStorage.setItem(LAST_USER_Q_KEY, t);
+                    }
                 } catch (error) {
                     typingIndicator.remove();
                     addMessage('Произошла ошибка связи с сервером. Пожалуйста, попробуйте ещё раз.');
