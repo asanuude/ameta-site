@@ -11,7 +11,9 @@
     "preview": "astro preview",
     "astro": "astro",
     "catalog:build": "node scripts/commerceml-to-catalog.mjs --data-dir ./data --out ./catalog.json",
-    "catalog:preview": "node scripts/commerceml-to-catalog.mjs --data-dir ./data --out ./public/catalog.json"
+    "catalog:preview": "node scripts/commerceml-to-catalog.mjs --data-dir ./data --out ./public/catalog.json",
+    "catalog:sync": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/sync-web1c.ps1",
+    "catalog:sync-push": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/publish-catalog-from-1c.ps1"
   },
   "dependencies": {
     "@astrojs/vercel": "^10.0.0",
