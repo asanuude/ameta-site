@@ -104,12 +104,14 @@ function getOrCreateCart(sessionId) {
 }
 
 function isInvoiceCommand(q) {
-    const l = q.toLowerCase();
+    const l = String(q || '').toLowerCase();
     return (
         l.includes('счет') ||
         l.includes('счёт') ||
         l.includes('выпиши') ||
-        l.includes('оплату')
+        l.includes('выставь') ||
+        l.includes('оплату') ||
+        l.includes('инвойс')
     );
 }
 
@@ -124,7 +126,16 @@ function normalizeCatalogToken(s) {
     return String(s || '')
         .toLowerCase()
         .replace(/ё/g, 'е')
+        .replace(/(\d)\s*x(?=\s|$|[^\wа-яё])/gi, '$1х')
         .replace(/[-–—_/]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+/** Строка из ответа бота: «… | Цена: … | В наличии: …» — убрать хвост от первой «|». */
+function stripPastedAssistantCatalogLine(text) {
+    return String(text || '')
+        .replace(/\s*\|[^\n]*/g, ' ')
         .replace(/\s+/g, ' ')
         .trim();
 }
@@ -148,7 +159,7 @@ function stripInvoicePhrases(text) {
             ' '
         )
         .replace(
-            /(?:^|\s)(?:дай|дайте|выпиши|сделай|оформи|сформируй|нужен|нужна|нужно|мне|нам)(?=\s|$|[.,;!?…])/gimu,
+            /(?:^|\s)(?:дай|дайте|выпиши|выставь|выставьте|сделай|оформи|сформируй|нужен|нужна|нужно|мне|нам)(?=\s|$|[.,;!?…])/gimu,
             ' '
         )
         .replace(/\s+/g, ' ')
@@ -162,7 +173,7 @@ function stripInvoicePhrases(text) {
 const RUB_END = '(?=\\s|[.,;!?()]|$)';
 
 function stripCatalogNoise(text) {
-    let s = String(text || '').trim();
+    let s = stripPastedAssistantCatalogLine(String(text || '').trim());
     s = s.replace(/^\d+\.\s*/, '');
     const dashPrice = new RegExp(`\\s*[—–\\-]\\s*\\d[\\d\\s\\u00A0]*руб\\.?${RUB_END}`, 'gi');
     const barePrice = new RegExp(`\\b\\d[\\d\\s\\u00A0]*руб\\.?${RUB_END}`, 'gi');
@@ -208,8 +219,89 @@ function findBestCatalogMatch(rawQuery, inStockProducts) {
     }
     if (hits.length === 0) return null;
 
-    hits.sort((a, b) => a.n.length - b.n.length || String(a.p.name).localeCompare(String(b.p.name), 'ru'));
+    const ambiguous = hits.length > 1;
+    hits.sort((a, b) => {
+        if (ambiguous) {
+            return (
+                b.n.length - a.n.length ||
+                String(a.p.name).localeCompare(String(b.p.name), 'ru')
+            );
+        }
+        return (
+            a.n.length - b.n.length || String(a.p.name).localeCompare(String(b.p.name), 'ru')
+        );
+    });
     return hits[0].p;
+}
+
+/** Короткое «дай счёт» без названия товара (для поиска товара в истории). */
+function isBareInvoiceRequest(text) {
+    const t = String(text || '').trim();
+    if (t.length > 55 || t.length < 4) return false;
+    if (t.includes('|')) return false;
+    if (!/(?:сч[её]т|счет)/iu.test(t)) return false;
+    if (/\sна\s+\S{3,}/iu.test(t)) return false;
+    return t.length <= 42;
+}
+
+/** Номерованные строки из ответа консультанта: «12. Название | …» */
+function parseNumberedCatalogLinesFromAssistant(content) {
+    const text = String(content || '');
+    const out = [];
+    const re = /^\s*(\d+)\.\s+([^\n|]+?)(?=\s*\||\s*$)/gim;
+    let m;
+    while ((m = re.exec(text)) !== null) {
+        const idx = parseInt(m[1], 10);
+        const name = stripPastedAssistantCatalogLine(m[2]).trim();
+        if (name && Number.isFinite(idx)) out.push({ idx, name });
+    }
+    return out;
+}
+
+/**
+ * Позиция для счёта: текущая фраза, пункт списка из последнего ответа ассистента, предыдущие реплики пользователя.
+ */
+function findProductForInvoice(session, question, inStockProducts) {
+    let g = findBestCatalogMatch(question, inStockProducts);
+    if (g) return g;
+
+    const q = String(question || '').trim();
+    const numHead = q.match(/^\s*(\d+)\.\s+/);
+    if (numHead) {
+        const wantIdx = parseInt(numHead[1], 10);
+        for (let i = session.messages.length - 1; i >= 0; i--) {
+            if (session.messages[i].role !== 'assistant') continue;
+            const rows = parseNumberedCatalogLinesFromAssistant(session.messages[i].content);
+            const row = rows.find((r) => r.idx === wantIdx);
+            if (row) {
+                g = findBestCatalogMatch(row.name, inStockProducts);
+                if (g) return g;
+            }
+        }
+    }
+
+    const msgs = session.messages || [];
+    for (let i = msgs.length - 1; i >= 0; i--) {
+        if (msgs[i].role !== 'user') continue;
+        const prev = msgs[i].content;
+        if (isBareInvoiceRequest(prev)) continue;
+        if (String(prev).trim().length < 6) continue;
+        g = findBestCatalogMatch(prev, inStockProducts);
+        if (g) return g;
+    }
+
+    for (let i = msgs.length - 1; i >= 0; i--) {
+        if (msgs[i].role !== 'assistant') continue;
+        const hint = String(msgs[i].content).match(
+            /сч[её]т\s+на\s*[«"]([^»"]+)[»"]/iu
+        );
+        if (hint) {
+            g = findBestCatalogMatch(hint[1], inStockProducts);
+            if (g) return g;
+        }
+    }
+
+    return null;
 }
 
 function formatInvoiceLinksBlock(onec) {
@@ -614,11 +706,7 @@ export default async function handler(req, res) {
             const inStock = products.filter(isInStock);
 
             if (cart.items.length === 0) {
-                let forMatch = question.replace(/добавь|положи|в\s+корзину/gi, ' ').trim();
-                forMatch = stripCatalogNoise(forMatch);
-                forMatch = stripQuantityPhrases(forMatch);
-                forMatch = stripInvoicePhrases(forMatch);
-                const guessed = findBestCatalogMatch(forMatch, inStock);
+                const guessed = findProductForInvoice(session, question, inStock);
                 if (guessed) {
                     const qty = extractQuantityFromText(question);
                     cart.items = [
