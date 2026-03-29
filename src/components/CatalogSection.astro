@@ -1,0 +1,46 @@
+---
+import CatalogSection from './CatalogSection.astro';
+
+interface Product {
+	id?: string;
+	name?: string;
+	description?: string;
+	sku?: string;
+	price?: number | string;
+	quantity?: number;
+	groupId?: string | null;
+}
+
+interface GroupNode {
+	id: string;
+	name: string;
+	products: Product[];
+	children: GroupNode[];
+}
+
+const { node } = Astro.props as { node: GroupNode };
+---
+
+<div class="folder-block" data-folder-id={node.id}>
+	<h2 class="folder-title">{node.name}</h2>
+	{node.products.length > 0 && (
+		<ul class="product-list">
+			{node.products.map((p) => (
+				<li class="product-card">
+					<div class="product-name">{p.name}</div>
+					{p.sku && <div class="product-sku">Код: {p.sku}</div>}
+					{p.description && <p class="product-desc">{p.description}</p>}
+					<div class="product-meta">
+						<span class="price">{typeof p.price === 'number' ? `${p.price.toLocaleString('ru-RU')} ₽` : p.price}</span>
+						<span class="qty">В наличии: {p.quantity ?? '—'}</span>
+					</div>
+				</li>
+			))}
+		</ul>
+	)}
+	{node.children.map((child) => (
+		<div class="folder-nested">
+			<CatalogSection node={child} />
+		</div>
+	))}
+</div>

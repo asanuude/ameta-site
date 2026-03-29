@@ -1,0 +1,266 @@
+---
+import fs from 'node:fs';
+import path from 'node:path';
+import CatalogSection from '../components/CatalogSection.astro';
+import SpeedInsights from '@vercel/speed-insights/astro';
+
+interface Group {
+	id: string;
+	name: string;
+	parentId?: string | null;
+}
+
+interface Product {
+	id?: string;
+	name?: string;
+	description?: string;
+	sku?: string;
+	price?: number | string;
+	quantity?: number;
+	groupId?: string | null;
+}
+
+interface GroupNode {
+	id: string;
+	name: string;
+	products: Product[];
+	children: GroupNode[];
+}
+
+const catalogPath = path.join(process.cwd(), 'public', 'catalog.json');
+let groups: Group[] = [];
+let products: Product[] = [];
+
+try {
+	const raw = JSON.parse(fs.readFileSync(catalogPath, 'utf-8')) as
+		| { groups?: Group[]; products?: Product[] }
+		| Product[];
+	if (Array.isArray(raw)) {
+		products = raw;
+	} else {
+		groups = raw.groups ?? [];
+		products = raw.products ?? [];
+	}
+} catch {
+	/* нет файла — пустой каталог */
+}
+
+function buildTree(parentId: string | null | undefined): GroupNode[] {
+	return groups
+		.filter((g) => (g.parentId ?? null) === (parentId ?? null))
+		.map((g) => ({
+			id: g.id,
+			name: g.name,
+			products: products.filter((p) => p.groupId === g.id),
+			children: buildTree(g.id),
+		}));
+}
+
+const groupIds = new Set(groups.map((g) => g.id));
+const orphans = products.filter((p) => !p.groupId || !groupIds.has(p.groupId));
+
+const tree = buildTree(null);
+const showTree = groups.length > 0;
+---
+
+<!doctype html>
+<html lang="ru">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>Каталог — AMETA</title>
+		<style>
+			* {
+				box-sizing: border-box;
+				margin: 0;
+				padding: 0;
+			}
+			body {
+				font-family:
+					-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+				background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+				min-height: 100vh;
+				color: #1a1a1a;
+				padding: 1rem;
+			}
+			.wrap {
+				max-width: 960px;
+				margin: 0 auto;
+			}
+			.top {
+				display: flex;
+				flex-wrap: wrap;
+				align-items: center;
+				justify-content: space-between;
+				gap: 1rem;
+				margin-bottom: 1.5rem;
+			}
+			.top h1 {
+				color: #fff;
+				font-size: 1.75rem;
+				font-weight: 800;
+				letter-spacing: -0.02em;
+			}
+			.top .hint {
+				color: rgba(255, 255, 255, 0.75);
+				font-size: 0.9rem;
+				max-width: 420px;
+			}
+			.nav {
+				display: flex;
+				gap: 0.75rem;
+			}
+			.nav a {
+				color: #fff;
+				text-decoration: none;
+				padding: 0.5rem 1rem;
+				border-radius: 999px;
+				background: rgba(255, 255, 255, 0.12);
+				font-weight: 600;
+				font-size: 0.9rem;
+			}
+			.nav a:hover {
+				background: rgba(255, 255, 255, 0.22);
+			}
+			.panel {
+				background: #fff;
+				border-radius: 20px;
+				padding: 1.5rem;
+				box-shadow: 0 16px 48px rgba(0, 0, 0, 0.35);
+			}
+			.folder-block {
+				margin-bottom: 1.5rem;
+			}
+			.folder-nested {
+				margin-left: 0.75rem;
+				padding-left: 1rem;
+				border-left: 3px solid #e8ecf4;
+			}
+			.folder-title {
+				font-size: 1.2rem;
+				margin-bottom: 0.75rem;
+				color: #0f3460;
+				font-weight: 700;
+			}
+			.product-list {
+				list-style: none;
+				display: flex;
+				flex-direction: column;
+				gap: 0.75rem;
+			}
+			.product-card {
+				background: #f4f6fb;
+				border-radius: 12px;
+				padding: 1rem 1.1rem;
+				border: 1px solid #e2e8f0;
+			}
+			.product-name {
+				font-weight: 700;
+				font-size: 1.05rem;
+				margin-bottom: 0.25rem;
+			}
+			.product-sku {
+				font-size: 0.8rem;
+				color: #64748b;
+				margin-bottom: 0.35rem;
+			}
+			.product-desc {
+				font-size: 0.9rem;
+				color: #475569;
+				line-height: 1.45;
+				margin-bottom: 0.5rem;
+			}
+			.product-meta {
+				display: flex;
+				flex-wrap: wrap;
+				gap: 1rem;
+				font-size: 0.9rem;
+			}
+			.price {
+				font-weight: 800;
+				color: #0f3460;
+			}
+			.qty {
+				color: #64748b;
+			}
+			.empty {
+				text-align: center;
+				padding: 2rem;
+				color: #64748b;
+			}
+		</style>
+	</head>
+	<body>
+		<div class="wrap">
+			<div class="top">
+				<div>
+					<h1>Каталог</h1>
+					<p class="hint">
+						Структура папок совпадает с группами из CommerceML (выгрузка 1С). Обновление — POST
+						<code>/api/update-catalog</code> с файлами import*.xml.
+					</p>
+				</div>
+				<nav class="nav">
+					<a href="/">Консультант</a>
+				</nav>
+			</div>
+			<div class="panel">
+				{
+					products.length === 0 ? (
+						<p class="empty">Каталог пуст. Загрузите выгрузку 1С или заполните public/catalog.json.</p>
+					) : showTree ? (
+						<>
+							{tree.map((node) => (
+								<CatalogSection node={node} />
+							))}
+							{orphans.length > 0 && (
+								<div class="folder-block">
+									<h2 class="folder-title">Без группы / прочее</h2>
+									<ul class="product-list">
+										{orphans.map((p) => (
+											<li class="product-card">
+												<div class="product-name">{p.name}</div>
+												{p.sku && <div class="product-sku">Код: {p.sku}</div>}
+												{p.description && <p class="product-desc">{p.description}</p>}
+												<div class="product-meta">
+													<span class="price">
+														{typeof p.price === 'number'
+															? `${p.price.toLocaleString('ru-RU')} ₽`
+															: p.price}
+													</span>
+													<span class="qty">В наличии: {p.quantity ?? '—'}</span>
+												</div>
+											</li>
+										))}
+									</ul>
+								</div>
+							)}
+						</>
+					) : (
+						<div class="folder-block">
+							<h2 class="folder-title">Все товары</h2>
+							<ul class="product-list">
+								{products.map((p) => (
+									<li class="product-card">
+										<div class="product-name">{p.name}</div>
+										{p.sku && <div class="product-sku">Код: {p.sku}</div>}
+										{p.description && <p class="product-desc">{p.description}</p>}
+										<div class="product-meta">
+											<span class="price">
+												{typeof p.price === 'number'
+													? `${p.price.toLocaleString('ru-RU')} ₽`
+													: p.price}
+											</span>
+											<span class="qty">В наличии: {p.quantity ?? '—'}</span>
+										</div>
+									</li>
+								))}
+							</ul>
+						</div>
+					)
+				}
+			</div>
+		</div>
+		<SpeedInsights />
+	</body>
+</html>

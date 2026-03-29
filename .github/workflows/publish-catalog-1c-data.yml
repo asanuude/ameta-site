@@ -1,0 +1,86 @@
+# Публикует catalog.json в репозиторий asanuude/1c-data (raw URL для CATALOG_URL в ask.js).
+#
+# Секреты (Settings → Secrets → Actions):
+#   UPDATE_1C_DATA_PAT — Personal Access Token (classic) с scope repo, доступ к asanuude/1c-data
+#
+# Опционально:
+#   COMMERCEML_ZIP_URL — URL zip-архива с import*.xml и offers*.xml в корне (curl без интерактива)
+#   Тогда перед сборкой архив распаковывается в data/ (перезапись).
+#
+# Как обновлять данные без zip:
+#   1) Положить свежие import*.xml / offers*.xml в папку data/ этого репозитория
+#   2) git commit + push в main — workflow запустится по путям data/**
+#   Или: Actions → Publish catalog to 1c-data → Run workflow
+
+name: Publish catalog to 1c-data
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Ежедневно 05:00 UTC (~08:00 МСК зимой)
+    - cron: '0 5 * * *'
+  push:
+    branches:
+      - main
+    paths:
+      - 'data/**'
+      - 'scripts/commerceml-to-catalog.mjs'
+      - '.github/workflows/publish-catalog-1c-data.yml'
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout ameta-site
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Optional — скачать CommerceML zip
+        env:
+          ZIP_URL: ${{ secrets.COMMERCEML_ZIP_URL }}
+        run: |
+          if [ -n "$ZIP_URL" ]; then
+            mkdir -p data
+            curl -fsSL "$ZIP_URL" -o /tmp/commerceml.zip
+            unzip -o /tmp/commerceml.zip -d data
+            echo "Распаковано в data/"
+          else
+            echo "COMMERCEML_ZIP_URL не задан — используются файлы из репозитория data/"
+          fi
+
+      - name: Build catalog.json
+        run: node scripts/commerceml-to-catalog.mjs --data-dir ./data --out ./catalog-out.json
+
+      - name: Push to 1c-data
+        env:
+          PAT: ${{ secrets.UPDATE_1C_DATA_PAT }}
+          TARGET_REPO: asanuude/1c-data
+        run: |
+          if [ -z "$PAT" ]; then
+            echo "::error::Секрет UPDATE_1C_DATA_PAT не задан. Добавьте PAT с правами repo на $TARGET_REPO."
+            exit 1
+          fi
+          git clone "https://x-access-token:${PAT}@github.com/${TARGET_REPO}.git" repo-1c-data
+          cp catalog-out.json repo-1c-data/catalog.json
+          cd repo-1c-data
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add catalog.json
+          if git diff --staged --quiet; then
+            echo "Изменений в catalog.json нет — push не нужен."
+          else
+            git commit -m "chore: sync catalog from CommerceML (${{ github.sha }})"
+            git push origin HEAD
+            echo "catalog.json отправлен в ${TARGET_REPO}"
+          fi

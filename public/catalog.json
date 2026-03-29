@@ -1,0 +1,52 @@
+{
+  "groups": [
+    {
+      "id": "g-root-1",
+      "parentId": null,
+      "name": "Торговое оборудование"
+    },
+    {
+      "id": "g-root-2",
+      "parentId": null,
+      "name": "Кассовое оборудование"
+    },
+    {
+      "id": "g-kkm",
+      "parentId": "g-root-2",
+      "name": "ККТ и фискальные регистраторы"
+    },
+    {
+      "id": "g-perif",
+      "parentId": "g-root-1",
+      "name": "Периферия"
+    }
+  ],
+  "products": [
+    {
+      "id": "demo-1",
+      "name": "Сканер штрихкода (пример)",
+      "description": "Замените данными из выгрузки 1С (CommerceML).",
+      "sku": "DEMO-SCAN-01",
+      "price": 12500,
+      "quantity": 3,
+      "groupId": "g-perif"
+    },
+    {
+      "id": "demo-2",
+      "name": "Весы торговые электронные (пример)",
+      "description": "После POST /api/update-catalog с import.xml папки подтянутся из 1С.",
+      "sku": "DEMO-SCALE-01",
+      "price": 45900,
+      "quantity": 1,
+      "groupId": "g-root-1"
+    },
+    {
+      "id": "demo-3",
+      "name": "Фискальный регистратор (пример)",
+      "sku": "DEMO-FR-01",
+      "price": 28900,
+      "quantity": 0,
+      "groupId": "g-kkm"
+    }
+  ]
+}

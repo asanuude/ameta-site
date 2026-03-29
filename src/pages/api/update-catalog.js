@@ -8,82 +8,90 @@ const UPDATE_SECRET = '0011524AaSs!!!';
 
 export async function POST({ request }) {
     try {
-        // Проверяем авторизацию (поддерживаем оба варианта)
         const authHeader = request.headers.get('Authorization');
         const basicAuth = authHeader?.startsWith('Basic ');
         let authorized = false;
 
-        // Если есть Basic Auth, проверяем логин/пароль
         if (basicAuth) {
             const base64Credentials = authHeader.split(' ')[1];
             const credentials = atob(base64Credentials);
             const [username, password] = credentials.split(':');
-            
+
             if (username === 'admin' && password === UPDATE_SECRET) {
                 authorized = true;
             }
-        } 
-        // Если есть Bearer token, проверяем его
-        else if (authHeader === `Bearer ${UPDATE_SECRET}`) {
+        } else if (authHeader === `Bearer ${UPDATE_SECRET}`) {
             authorized = true;
         }
 
         if (!authorized) {
-            return new Response(JSON.stringify({ error: 'Unauthorized' }), { 
+            return new Response(JSON.stringify({ error: 'Unauthorized' }), {
                 status: 401,
-                headers: { 'Content-Type': 'application/json' }
+                headers: { 'Content-Type': 'application/json' },
             });
         }
 
-        // Получаем данные из 1С
         const formData = await request.formData();
         const files = [];
-        
-        // Собираем все загруженные файлы
-        for (const [key, value] of formData.entries()) {
+
+        for (const [, value] of formData.entries()) {
             if (value instanceof File) {
                 files.push({
                     name: value.name,
-                    content: await value.text()
+                    content: await value.text(),
                 });
             }
         }
 
         if (files.length === 0) {
-            return new Response(JSON.stringify({ error: 'No files uploaded' }), { 
+            return new Response(JSON.stringify({ error: 'No files uploaded' }), {
                 status: 400,
-                headers: { 'Content-Type': 'application/json' }
+                headers: { 'Content-Type': 'application/json' },
             });
         }
 
-        // Парсим и объединяем все товары
         let allProducts = [];
         let allOffers = [];
+        const groupMap = new Map();
 
         for (const file of files) {
             if (file.name.startsWith('import')) {
                 const parsed = await parseXMLString(file.content);
-                const products = parsed?.КоммерческаяИнформация?.Каталог?.[0]?.Товары?.[0]?.Товар || [];
+                const ci = parsed?.КоммерческаяИнформация;
+                const classifierRoot =
+                    ci?.[0]?.Классификатор?.[0]?.Группы?.[0]?.Группа ??
+                    ci?.Классификатор?.[0]?.Группы?.[0]?.Группа;
+                flattenCommerceGroups(classifierRoot, null, groupMap);
+
+                const catalogBlock = ci?.[0]?.Каталог?.[0] ?? ci?.Каталог?.[0];
+                const rawProducts = catalogBlock?.Товары?.[0]?.Товар;
+                const products = asArray(rawProducts);
                 allProducts = [...allProducts, ...products];
             }
             if (file.name.startsWith('offers')) {
                 const parsed = await parseXMLString(file.content);
-                const offers = parsed?.КоммерческаяИнформация?.ПакетПредложений?.[0]?.Предложения?.[0]?.Предложение || [];
+                const ci = parsed?.КоммерческаяИнформация;
+                const rawOffers =
+                    ci?.[0]?.ПакетПредложений?.[0]?.Предложения?.[0]?.Предложение ??
+                    ci?.ПакетПредложений?.[0]?.Предложения?.[0]?.Предложение;
+                const offers = asArray(rawOffers);
                 allOffers = [...allOffers, ...offers];
             }
         }
 
-        // Формируем готовый каталог
-        const catalog = allProducts.map(product => {
-            const offer = allOffers.find(o => o.Ид?.[0] === product.Ид?.[0]);
-            
-            // Считаем общее количество по всем складам
+        const groups = [...groupMap.values()];
+
+        const products = allProducts.map((product) => {
+            const offer = allOffers.find((o) => o.Ид?.[0] === product.Ид?.[0]);
+
             let totalQuantity = 0;
             if (offer?.Склад) {
-                offer.Склад.forEach(sklad => {
+                offer.Склад.forEach((sklad) => {
                     totalQuantity += Number(sklad.$.КоличествоНаСкладе || 0);
                 });
             }
+
+            const gid = product.ИдГруппы?.[0] || null;
 
             return {
                 id: product.Ид?.[0],
@@ -91,43 +99,51 @@ export async function POST({ request }) {
                 description: product.Описание?.[0] || '',
                 price: offer?.Цены?.[0]?.Цена?.[0]?.ЦенаЗаЕдиницу?.[0] || 'Цена не указана',
                 quantity: totalQuantity,
-                sku: product.ЗначенияРеквизитов?.[0]?.ЗначениеРеквизита?.find(
-                    r => r.Наименование?.[0] === 'Код'
-                )?.Значение?.[0]?.trim() || ''
+                sku:
+                    product.ЗначенияРеквизитов?.[0]?.ЗначениеРеквизита?.find(
+                        (r) => r.Наименование?.[0] === 'Код'
+                    )?.Значение?.[0]?.trim() || '',
+                groupId: gid,
             };
         });
 
-        // Сохраняем готовый каталог в JSON
+        const payload = { groups, products };
+
         const catalogPath = path.join('/tmp', 'catalog.json');
-        fs.writeFileSync(catalogPath, JSON.stringify(catalog, null, 2));
+        fs.writeFileSync(catalogPath, JSON.stringify(payload, null, 2));
 
-        // Также сохраняем копию в папку проекта (на всякий случай)
-        const projectCatalogPath = path.join(process.cwd(), 'data', 'catalog.json');
-        if (!fs.existsSync(path.join(process.cwd(), 'data'))) {
-            fs.mkdirSync(path.join(process.cwd(), 'data'), { recursive: true });
+        const dataDir = path.join(process.cwd(), 'data');
+        if (!fs.existsSync(dataDir)) {
+            fs.mkdirSync(dataDir, { recursive: true });
         }
-        fs.writeFileSync(projectCatalogPath, JSON.stringify(catalog, null, 2));
+        fs.writeFileSync(path.join(dataDir, 'catalog.json'), JSON.stringify(payload, null, 2));
 
-        return new Response(JSON.stringify({ 
-            success: true, 
-            productsCount: catalog.length 
-        }), { 
-            status: 200,
-            headers: { 'Content-Type': 'application/json' }
-        });
+        const publicDir = path.join(process.cwd(), 'public');
+        if (!fs.existsSync(publicDir)) {
+            fs.mkdirSync(publicDir, { recursive: true });
+        }
+        fs.writeFileSync(path.join(publicDir, 'catalog.json'), JSON.stringify(payload, null, 2));
 
+        return new Response(
+            JSON.stringify({
+                success: true,
+                productsCount: products.length,
+                groupsCount: groups.length,
+            }),
+            {
+                status: 200,
+                headers: { 'Content-Type': 'application/json' },
+            }
+        );
     } catch (error) {
         console.error('Update error:', error);
-        return new Response(JSON.stringify({ 
-            error: error.message 
-        }), { 
+        return new Response(JSON.stringify({ error: error.message }), {
             status: 500,
-            headers: { 'Content-Type': 'application/json' }
+            headers: { 'Content-Type': 'application/json' },
         });
     }
 }
 
-// Вспомогательная функция для парсинга XML
 async function parseXMLString(xmlString) {
     return new Promise((resolve, reject) => {
         parseString(xmlString, (err, result) => {
@@ -135,4 +151,21 @@ async function parseXMLString(xmlString) {
             else resolve(result);
         });
     });
+}
+
+function asArray(x) {
+    if (x == null) return [];
+    return Array.isArray(x) ? x : [x];
+}
+
+function flattenCommerceGroups(nodes, parentId, groupMap) {
+    for (const node of asArray(nodes)) {
+        const id = node.Ид?.[0];
+        const name = (node.Наименование?.[0] || '').trim();
+        if (id && name && !groupMap.has(id)) {
+            groupMap.set(id, { id, parentId: parentId ?? null, name });
+        }
+        const inner = node.Группы?.[0]?.Группа;
+        flattenCommerceGroups(inner, id || parentId, groupMap);
+    }
 }

@@ -1,0 +1,19 @@
+{
+  "redirects": [
+    {
+      "source": "/bitrix/:path*",
+      "destination": "/",
+      "permanent": true
+    },
+    {
+      "source": "/news/:path*",
+      "destination": "/",
+      "permanent": true
+    },
+    {
+      "source": "/robots.txt",
+      "destination": "/",
+      "permanent": true
+    }
+  ]
+}
