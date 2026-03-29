@@ -132,8 +132,9 @@ function normalizeCatalogToken(s) {
 /** Убирает «1 шт.», «3 штуки» и т.п. из запроса */
 function stripQuantityPhrases(text) {
     return String(text || '')
+        .replace(/\(\s*\d+\s*(?:шт\.?|штук(?:и|а)?|pcs?)\s*\)/gi, ' ')
         .replace(/\b\d+\s*(?:шт\.?|штук(?:и|а)?|pcs?)\b/gi, ' ')
-        .replace(/\(\s*\)/g, ' ')
+        .replace(/\([\s.]*\)/g, ' ')
         .replace(/^\d+\s+/, '')
         .replace(/\s+/g, ' ')
         .trim();
@@ -142,9 +143,12 @@ function stripQuantityPhrases(text) {
 /** Убирает типовые слова про счёт/оплату — остаётся суть товара */
 function stripInvoicePhrases(text) {
     return String(text || '')
-        .replace(/\b(?:дай|дайте|выпиши|сделай|оформи|сформируй|нужен|нужна|нужно|мне|нам)\b/gi, ' ')
         .replace(
-            /сч(?:[её]|[eE])т(?:\s+на)?|на\s+оплату|к\s+оплате|проформ[ау]|инвойс/gi,
+            /сч(?:[её]|[eE])т(?:\s+на)?|на\s+оплату|(?:^|\s)оплату(?=\s|$|[.,;!?…])/gimu,
+            ' '
+        )
+        .replace(
+            /(?:^|\s)(?:дай|дайте|выпиши|сделай|оформи|сформируй|нужен|нужна|нужно|мне|нам)(?=\s|$|[.,;!?…])/gimu,
             ' '
         )
         .replace(/\s+/g, ' ')
@@ -154,11 +158,16 @@ function stripInvoicePhrases(text) {
 /**
  * Убирает цену и служебные символы из строки, скопированной из ответа бота («— 62880 руб.»).
  */
+/** Окончание суммы «руб»: нельзя использовать \b после кириллицы в JS (ё не «word char»). */
+const RUB_END = '(?=\\s|[.,;!?()]|$)';
+
 function stripCatalogNoise(text) {
     let s = String(text || '').trim();
     s = s.replace(/^\d+\.\s*/, '');
-    s = s.replace(/[—–-]\s*\d[\d\s\u00A0]*руб\.?\b/gi, ' ');
-    s = s.replace(/\b\d[\d\s\u00A0]*руб\.?\b/gi, ' ');
+    const dashPrice = new RegExp(`\\s*[—–\\-]\\s*\\d[\\d\\s\\u00A0]*руб\\.?${RUB_END}`, 'gi');
+    const barePrice = new RegExp(`\\b\\d[\\d\\s\\u00A0]*руб\\.?${RUB_END}`, 'gi');
+    s = s.replace(dashPrice, ' ');
+    s = s.replace(barePrice, ' ');
     s = s.replace(/[!?.…]+$/g, '');
     s = s.replace(/\s+/g, ' ').trim();
     return s;
