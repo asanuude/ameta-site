@@ -143,7 +143,10 @@ function stripQuantityPhrases(text) {
 function stripInvoicePhrases(text) {
     return String(text || '')
         .replace(/\b(?:дай|дайте|выпиши|сделай|оформи|сформируй|нужен|нужна|нужно|мне|нам)\b/gi, ' ')
-        .replace(/сч[её]т(?:\s+на)?|счет(?:\s+на)?|на\s+оплату|к\s+оплате|проформ[ау]|инвойс/gi, ' ')
+        .replace(
+            /сч(?:[её]|[eE])т(?:\s+на)?|на\s+оплату|к\s+оплате|проформ[ау]|инвойс/gi,
+            ' '
+        )
         .replace(/\s+/g, ' ')
         .trim();
 }
@@ -524,13 +527,10 @@ export default async function handler(req, res) {
             const inStock = products.filter(isInStock);
 
             if (cart.items.length === 0) {
-                const forMatch = stripCatalogNoise(
-                    stripQuantityPhrases(
-                        stripInvoicePhrases(
-                            question.replace(/добавь|положи|в\s+корзину/gi, ' ').trim()
-                        )
-                    )
-                );
+                let forMatch = question.replace(/добавь|положи|в\s+корзину/gi, ' ').trim();
+                forMatch = stripCatalogNoise(forMatch);
+                forMatch = stripQuantityPhrases(forMatch);
+                forMatch = stripInvoicePhrases(forMatch);
                 const guessed = findBestCatalogMatch(forMatch, inStock);
                 if (guessed) {
                     const qty = extractQuantityFromText(question);
