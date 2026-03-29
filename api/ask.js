@@ -354,7 +354,13 @@ export default async function handler(req, res) {
         }
         
         // 3️⃣ ПОКАЗАТЬ КОРЗИНУ
-        if (lowerQ.includes('корзин') || lowerQ.includes('заказ') || lowerQ.includes('что выбрал')) {
+        // Не путать с «заказ на сумму / доставку заказа» — только просмотр корзины
+        const wantsCartSummary =
+            lowerQ.includes('корзин') ||
+            lowerQ.includes('что выбрал') ||
+            /\bмой\s+заказ\b/.test(lowerQ) ||
+            (/\bпокажи\b/u.test(lowerQ) && lowerQ.includes('заказ'));
+        if (wantsCartSummary) {
             
             let answer;
             if (shoppingCarts.has(sessionId) && shoppingCarts.get(sessionId).items.length > 0) {
@@ -399,7 +405,11 @@ export default async function handler(req, res) {
 5. Всегда предлагай доставку и сервис`;
 
         // 5️⃣ ОПРЕДЕЛЯЕМ, ЭТО ЗАПРОС ПОМОЩИ
-        const isHelpRequest = /помоги|посоветуй|категории|что есть|расскажи/i.test(question);
+        // Без сырого «что есть» — иначе срабатывает на «что есть в наличии до … руб»
+        const isHelpRequest =
+            /помоги|посоветуй|категори|какие\s+разделы|что\s+у\s+вас\s+в\s+продаже|расскажи/i.test(
+                question
+            );
         
         if (isHelpRequest) {
             const stats = getCategoryStats(products);
