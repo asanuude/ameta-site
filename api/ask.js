@@ -119,6 +119,73 @@ function parseRussianInn(text) {
     return null;
 }
 
+/** Нормализация для сопоставления с наименованием в каталоге */
+function normalizeCatalogToken(s) {
+    return String(s || '')
+        .toLowerCase()
+        .replace(/ё/g, 'е')
+        .replace(/[-–—_/]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+/** Убирает «1 шт.», «3 штуки» и т.п. из запроса */
+function stripQuantityPhrases(text) {
+    return String(text || '')
+        .replace(/\b\d+\s*(?:шт\.?|штук(?:и|а)?|pcs?)\b/gi, ' ')
+        .replace(/^\d+\s+/, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+/** Убирает типовые слова про счёт/оплату — остаётся суть товара */
+function stripInvoicePhrases(text) {
+    return String(text || '')
+        .replace(/\b(?:дай|дайте|выпиши|сделай|оформи|сформируй|нужен|нужна|нужно)\b/gi, ' ')
+        .replace(/сч[её]т(?:\s+на)?|счет(?:\s+на)?|на\s+оплату|к\s+оплате|проформ[ау]|инвойс/gi, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+/** Количество из фразы «… 2 шт.» */
+function extractQuantityFromText(text) {
+    const m = String(text || '').match(/(\d+)\s*(?:шт\.?|штук(?:и|а)?)\b/i);
+    if (!m) return 1;
+    const n = parseInt(m[1], 10);
+    if (!Number.isFinite(n)) return 1;
+    return Math.min(99, Math.max(1, n));
+}
+
+/**
+ * Подбор одной позиции из каталога (в наличии): подстрока или все значимые токены в наименовании.
+ */
+function findBestCatalogMatch(rawQuery, inStockProducts) {
+    let q = stripQuantityPhrases(
+        String(rawQuery || '')
+            .replace(/добавь|положи|в\s+корзину|пожалуйста/gi, ' ')
+            .trim()
+    );
+    q = stripInvoicePhrases(q);
+    q = normalizeCatalogToken(q);
+    if (!q || q.length < 2) return null;
+
+    const pool = inStockProducts.map((p) => ({
+        p,
+        n: normalizeCatalogToken(p.name || ''),
+    }));
+
+    let hits = pool.filter(({ n }) => n.includes(q));
+    if (hits.length === 0) {
+        const tokens = q.split(' ').filter((t) => t.length >= 2);
+        if (tokens.length === 0) return null;
+        hits = pool.filter(({ n }) => tokens.every((t) => n.includes(t)));
+    }
+    if (hits.length === 0) return null;
+
+    hits.sort((a, b) => a.n.length - b.n.length || String(a.p.name).localeCompare(String(b.p.name), 'ru'));
+    return hits[0].p;
+}
+
 function formatInvoiceLinksBlock(onec) {
     const parts = [];
     const pdf = (onec.pdfUrl || onec.documentUrl || '').trim();
@@ -445,58 +512,78 @@ export default async function handler(req, res) {
         // 1️⃣ Старт: запрос счёта → сначала организация и ИНН
         if (isInvoiceCommand(question)) {
             const cart = getOrCreateCart(sessionId);
+            const inStock = products.filter(isInStock);
 
             if (cart.items.length === 0) {
-                const answer =
-                    `Чтобы выписать счёт, сначала **добавьте товары в корзину**.\n\n` +
-                    `Например:\n` +
-                    `- "добавь сканер Атол"\n` +
-                    `- "положи в корзину весы МК-15"\n` +
-                    `- "покажи корзину"`;
-                return pushAndReturn(answer);
+                const forMatch = stripQuantityPhrases(
+                    stripInvoicePhrases(
+                        question.replace(/добавь|положи|в\s+корзину/gi, ' ').trim()
+                    )
+                );
+                const guessed = findBestCatalogMatch(forMatch, inStock);
+                if (guessed) {
+                    const qty = extractQuantityFromText(question);
+                    cart.items = [
+                        {
+                            id: guessed.id || '',
+                            sku: guessed.sku || '',
+                            name: guessed.name,
+                            price: guessed.price,
+                            quantity: qty,
+                        },
+                    ];
+                    cart.timestamp = Date.now();
+                } else {
+                    const answer =
+                        `Не смог однозначно сопоставить товар в каталоге. Можно так:\n\n` +
+                        `• **Один товар:** напишите точнее, как в каталоге, например: *«счёт на Мясорубка ТС-32»*.\n` +
+                        `• **Через корзину:** *«добавь Мясорубка ТС-32»*, затем *«выпиши счёт»*.\n` +
+                        `• *«покажи корзину»* — проверить состав.\n\n` +
+                        `Если только что видели список в чате — скопируйте **наименование из строки каталога** (до символа «|»).`;
+                    return pushAndReturn(answer);
+                }
             }
 
             cart.invoiceDraft = { step: 'await_org' };
+            const lines = cart.items
+                .map((i) => `- **${i.name}** — ${i.quantity} шт. (${cartLineTotal(i)} руб.)`)
+                .join('\n');
             const answer =
-                `**На какую организацию вам удобно выставить счёт?**\n\n` +
-                `Напишите одним сообщением полное или краткое наименование. После этого спрошу **ИНН**.\n\n` +
-                `Отмена — слово **отмена**.`;
+                `**Позиции в счёте:**\n${lines}\n\n` +
+                `**На какую организацию выставить счёт?**\n\n` +
+                `Напишите одним сообщением полное или краткое наименование, затем спрошу **ИНН**.\n\n` +
+                `Отмена — **отмена**.`;
             return pushAndReturn(answer);
         }
         
         // 2️⃣ ДОБАВЛЕНИЕ В КОРЗИНУ
         if (lowerQ.includes('добавь') || lowerQ.includes('положи') || lowerQ.includes('в корзину')) {
-            
             const searchQuery = question.replace(/добавь|положи|в корзину|пожалуйста/gi, '').trim();
-            
+
             if (!searchQuery) {
-                const answer = `Что именно добавить? Например: "добавь детектор IRD-1000"`;
+                const answer = `Что именно добавить? Например: «добавь детектор IRD-1000» или «Мясорубка ТС-32 — в корзину 1 шт.»`;
                 session.messages.push({ role: 'user', content: question });
                 session.messages.push({ role: 'assistant', content: answer });
                 return res.status(200).json({ answer });
             }
-            
-            // Простой поиск для добавления в корзину
-            const found = products
-                .filter(isInStock)
-                .filter(p => (p.name || '').toLowerCase().includes(searchQuery.toLowerCase()))
-                .slice(0, 1);
-            
-            if (found.length > 0) {
-                const product = found[0];
-                
+
+            const inStock = products.filter(isInStock);
+            const product = findBestCatalogMatch(searchQuery, inStock);
+            const addQty = extractQuantityFromText(question);
+
+            if (product) {
                 const cart = getOrCreateCart(sessionId);
 
-                const existing = cart.items.find(item => item.name === product.name);
+                const existing = cart.items.find((item) => item.name === product.name);
                 if (existing) {
-                    existing.quantity++;
+                    existing.quantity += addQty;
                 } else {
                     cart.items.push({
                         id: product.id || '',
                         sku: product.sku || '',
                         name: product.name,
                         price: product.price,
-                        quantity: 1,
+                        quantity: addQty,
                     });
                 }
                 cart.timestamp = Date.now();
@@ -511,7 +598,13 @@ export default async function handler(req, res) {
                 
                 return res.status(200).json({ answer });
             } else {
-                const answer = `Товар "${searchQuery}" не найден. Попробуйте уточнить название.`;
+                const short = stripQuantityPhrases(
+                    searchQuery.replace(/добавь|положи|в\s+корзину|пожалуйста/gi, ' ').trim()
+                );
+                const answer =
+                    `Товар по запросу «${escapeHtml(short)}» в наличии не нашёл. Напишите **как в каталоге** ` +
+                    `(например *Мясорубка ТС-32* — без лишних слов «1 шт.» в середине названия), ` +
+                    `или скопируйте строку из моего предыдущего списка **до знака «|»**.`;
                 session.messages.push({ role: 'user', content: question });
                 session.messages.push({ role: 'assistant', content: answer });
                 return res.status(200).json({ answer });
@@ -550,6 +643,11 @@ export default async function handler(req, res) {
         // 4️⃣ СИСТЕМНЫЙ ПРОМПТ
         const systemPrompt = `Ты — профессиональный консультант компании AMETA. Мы продаём ВСЁ, что может понадобиться для оснащения коммерческих помещений.
 
+СТИЛЬ ОБЩЕНИЯ:
+- Обращайся на «вы», вежливо и по делу, без канцелярита и без лишних повторов одной и той же фразы.
+- В конце ответа не перегружай текст призывами «свяжитесь с менеджером» — один аккуратный контакт, если уместно.
+- Если перечислил товары из списка, в конце одной строкой: для счёта клиент может написать «счёт на [название из списка]» или «добавь [название] в корзину».
+
 КРИТИЧЕСКИЕ ПРАВИЛА ПО КАТАЛОГУ:
 - Перечисляй ТОЛЬКО товары из переданного ниже списка, с теми же названиями, ценами и количеством.
 - Если список пуст или в нём нет подходящих позиций — так и скажи, предложи связаться с менеджером или уточнить запрос. НЕ ПРИДУМЫВАЙ модели, бренды и цены (никаких «от 15 000», «Штрих-М КК3» и т.п., если их нет в списке).
@@ -566,8 +664,8 @@ export default async function handler(req, res) {
 1. Отвечай как опытный консультант, используя данные из каталога
 2. Если клиент спрашивает про конкретный товар — найди его в каталоге
 3. Если клиент спрашивает про категорию — покажи все подходящие товары из каталога
-4. Если товара нет в наличии — предложи под заказ
-5. Всегда предлагай доставку и сервис`;
+4. Если товара нет в наличии — предложи под заказ или уточнение
+5. Доставку и сервис упоминай кратко, если это уместно по контексту`;
 
         // 5️⃣ ОПРЕДЕЛЯЕМ, ЭТО ЗАПРОС ПОМОЩИ
         // Без сырого «что есть» — иначе срабатывает на «что есть в наличии до … руб»

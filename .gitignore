@@ -22,3 +22,6 @@ Thumbs.db
 
 # Локальный portable GitHub CLI (см. команды в ответе агента)
 tools/gh/
+
+# Секреты вебхука 1С (копия без точки в имени — см. ИНСТРУКЦИЯ-вебхук-Vercel-1С.txt)
+webhook-env-FOR-VERCEL-COPY.txt
