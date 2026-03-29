@@ -438,14 +438,26 @@ import SpeedInsights from "@vercel/speed-insights/astro";
             function addMessage(text, isUser = false) {
                 const messageDiv = document.createElement('div');
                 messageDiv.className = `message ${isUser ? 'user-message' : 'bot-message'}`;
-                
-                if (text.includes('✅') || text.includes('**')) {
-                    messageDiv.innerHTML = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-                                               .replace(/\n/g, '<br>');
+
+                const useRichBot =
+                    !isUser &&
+                    (text.includes('✅') ||
+                        text.includes('**') ||
+                        text.includes('](') ||
+                        /https?:\/\//i.test(text));
+
+                if (useRichBot) {
+                    let h = text.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+                    h = h.replace(
+                        /\[([^\]]+)]\((https?:[^)\s]+)\)/g,
+                        '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>'
+                    );
+                    h = h.replace(/\n/g, '<br>');
+                    messageDiv.innerHTML = h;
                 } else {
                     messageDiv.textContent = text;
                 }
-                
+
                 messagesDiv.appendChild(messageDiv);
                 messagesDiv.scrollTop = messagesDiv.scrollHeight;
             }

@@ -81,6 +81,62 @@ function cartLineTotal(item) {
     return p * (item.quantity || 1);
 }
 
+function escapeHtml(s) {
+    return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
+function getOrCreateCart(sessionId) {
+    if (!shoppingCarts.has(sessionId)) {
+        shoppingCarts.set(sessionId, {
+            items: [],
+            timestamp: Date.now(),
+            invoiceDraft: null,
+        });
+    }
+    const c = shoppingCarts.get(sessionId);
+    if (c.invoiceDraft === undefined) c.invoiceDraft = null;
+    c.timestamp = Date.now();
+    return c;
+}
+
+function isInvoiceCommand(q) {
+    const l = q.toLowerCase();
+    return (
+        l.includes('счет') ||
+        l.includes('счёт') ||
+        l.includes('выпиши') ||
+        l.includes('оплату')
+    );
+}
+
+function parseRussianInn(text) {
+    const d = String(text).replace(/\D/g, '');
+    if (d.length === 10 || d.length === 12) return d;
+    return null;
+}
+
+function formatInvoiceLinksBlock(onec) {
+    const parts = [];
+    const pdf = (onec.pdfUrl || onec.documentUrl || '').trim();
+    const view = (onec.viewUrl || '').trim();
+    if (view && /^https?:\/\//i.test(view)) {
+        parts.push(`[Открыть в браузере](${view})`);
+    }
+    if (pdf && /^https?:\/\//i.test(pdf)) {
+        parts.push(`[Скачать PDF счёта](${pdf})`);
+    } else if (view && /^https?:\/\//i.test(view) && /\.pdf(\?|$)/i.test(view)) {
+        parts.push(`[Скачать PDF счёта](${view})`);
+    }
+    if (parts.length === 0) {
+        parts.push('Ссылка на PDF от 1С не указана — попросите менеджера выслать счёт.');
+    }
+    return `\n\n**Документ:**\n${parts.join('\n')}\n\n_Ссылка может быть с ограниченным сроком действия — сохраните PDF._`;
+}
+
 // Функция для получения случайных товаров (резервный вариант)
 function getRandomProducts(products, count = 3) {
     const inStock = products.filter(isInStock);
@@ -276,59 +332,136 @@ export default async function handler(req, res) {
         const session = conversationHistory.get(sessionId);
         session.timestamp = Date.now();
         
-        const lowerQ = question.toLowerCase();
-        
-        // 1️⃣ ВЫСТАВЛЕНИЕ СЧЁТА
-        if (lowerQ.includes('счет') || lowerQ.includes('счёт') || lowerQ.includes('выпиши') || lowerQ.includes('оплату')) {
-            
-            if (!shoppingCarts.has(sessionId)) {
-                shoppingCarts.set(sessionId, { items: [], timestamp: Date.now() });
-            }
-            const cart = shoppingCarts.get(sessionId);
-            
-            let answer;
-            if (cart.items.length > 0) {
-                const itemsList = cart.items
-                    .map(
-                        (item) =>
-                            `- ${item.name} (${item.quantity} шт.) — ${cartLineTotal(item)} руб.`
-                    )
-                    .join('\n');
-                const total = cart.items.reduce((sum, item) => sum + cartLineTotal(item), 0);
+        const lowerQ = question.toLowerCase().trim();
 
-                const onec = await sendInvoiceRequestTo1C({
-                    sessionId,
-                    items: cart.items,
-                });
-
-                let invoiceBlock = '';
-                if (!onec.configured) {
-                    invoiceBlock =
-                        `\n\n⚠️ Автовыставление счёта в 1С **не подключено**: задайте в Vercel переменные **ONEC_INVOICE_WEBHOOK_URL** и **ONEC_INVOICE_WEBHOOK_SECRET** (см. `.env.example`).`;
-                } else if (onec.ok) {
-                    const num = onec.invoiceNumber ? `**№ ${onec.invoiceNumber}**` : 'создан';
-                    const link = onec.documentUrl ? `\nСсылка: ${onec.documentUrl}` : '';
-                    invoiceBlock = `\n\n✅ Счёт в 1С ${num}.${link}`;
-                } else {
-                    invoiceBlock = `\n\n⚠️ 1С не создала счёт автоматически: ${onec.error}`;
-                }
-
-                answer =
-                    `**Ваш заказ:**\n\n${itemsList}\n\n**Итого: ${total} руб.**` +
-                    invoiceBlock +
-                    `\n\nПри необходимости оформления или уточнений свяжитесь с менеджером.${MANAGER_CONTACT}`;
-            } else {
-                answer = `Я вижу, вы хотите оформить заказ. Чтобы выписать счёт, сначала добавьте товары в корзину.\n\n` +
-                    `Например, спросите:\n` +
-                    `- "добавь детектор IRD-1000"\n` +
-                    `- "положи в корзину весы BS 815"\n` +
-                    `- "покажи корзину"`;
-            }
-            
+        const pushAndReturn = (text) => {
             session.messages.push({ role: 'user', content: question });
-            session.messages.push({ role: 'assistant', content: answer });
-            
-            return res.status(200).json({ answer });
+            session.messages.push({ role: 'assistant', content: text });
+            return res.status(200).json({ answer: text });
+        };
+
+        // Отмена пошагового счёта
+        const cartExisting = shoppingCarts.has(sessionId) ? shoppingCarts.get(sessionId) : null;
+        if (
+            cartExisting?.invoiceDraft &&
+            /отмен|не\s*надо|хватит|^стоп$|отказ/i.test(lowerQ)
+        ) {
+            cartExisting.invoiceDraft = null;
+            cartExisting.timestamp = Date.now();
+            return pushAndReturn(
+                'Оформление счёта **отменено**. Корзина сохранена — можете снова написать «выпиши счёт».'
+            );
+        }
+
+        // Ответ на вопрос про организацию
+        if (cartExisting?.invoiceDraft?.step === 'await_org') {
+            if (!cartExisting.items?.length) {
+                cartExisting.invoiceDraft = null;
+                return pushAndReturn(
+                    'Корзина пуста — добавьте товары, затем снова запросите счёт.'
+                );
+            }
+            if (isInvoiceCommand(question)) {
+                return pushAndReturn(
+                    'Вы уже оформляете счёт. Напишите одним сообщением **наименование организации** (не повторяйте «выпиши счёт»).'
+                );
+            }
+            const org = question.trim();
+            if (org.length < 2) {
+                return pushAndReturn(
+                    'Уточните, пожалуйста: **на какую организацию выставить счёт?** (полное или краткое наименование).'
+                );
+            }
+            cartExisting.invoiceDraft = { step: 'await_inn', organizationName: org };
+            cartExisting.timestamp = Date.now();
+            const safeOrg = escapeHtml(org).replace(/\*/g, '');
+            return pushAndReturn(
+                `Принято: **${safeOrg}**\n\n` +
+                    `**Укажите ИНН** этой организации (10 цифр для юрлица или 12 для ИП). Можно с пробелами.\n\n` +
+                    `Если нужно прервать — напишите **отмена**.`
+            );
+        }
+
+        // Ответ с ИНН → вызов 1С (заказ + счёт)
+        if (cartExisting?.invoiceDraft?.step === 'await_inn') {
+            if (!cartExisting.items?.length) {
+                cartExisting.invoiceDraft = null;
+                return pushAndReturn('Корзина пуста — начните с добавления товаров.');
+            }
+            if (isInvoiceCommand(question)) {
+                return pushAndReturn(
+                    'Сейчас нужен **ИНН** (10 или 12 цифр). Введите его одним сообщением или напишите **отмена**.'
+                );
+            }
+            const inn = parseRussianInn(question);
+            if (!inn) {
+                return pushAndReturn(
+                    'ИНН не распознан. Нужно **10** или **12** цифр подряд (например 032600556314). Попробуйте ещё раз.'
+                );
+            }
+            const organizationName = cartExisting.invoiceDraft.organizationName || '';
+            cartExisting.invoiceDraft = null;
+            cartExisting.timestamp = Date.now();
+
+            const itemsList = cartExisting.items
+                .map(
+                    (item) =>
+                        `- ${item.name} (${item.quantity} шт.) — ${cartLineTotal(item)} руб.`
+                )
+                .join('\n');
+            const total = cartExisting.items.reduce((sum, item) => sum + cartLineTotal(item), 0);
+
+            const onec = await sendInvoiceRequestTo1C({
+                sessionId,
+                items: cartExisting.items,
+                counterparty: { organizationName, inn },
+            });
+
+            let mid = '';
+            if (!onec.configured) {
+                mid =
+                    `\n\n⚠️ Вебхук 1С **не настроен** (переменные **ONEC_INVOICE_WEBHOOK_*** в Vercel). Данные контрагента переданы только вам здесь в чате.`;
+            } else if (onec.ok) {
+                const ord = onec.orderNumber
+                    ? `\n**Заказ клиента:** ${escapeHtml(onec.orderNumber)}.`
+                    : '';
+                mid =
+                    `\n\n✅ В 1С созданы документы.${ord}\n**Счёт:** ${onec.invoiceNumber ? `№ **${escapeHtml(onec.invoiceNumber)}**` : 'создан'}.` +
+                    formatInvoiceLinksBlock(onec);
+            } else {
+                mid = `\n\n⚠️ 1С вернула ошибку: ${escapeHtml(onec.error || '')}`;
+            }
+
+            const safeOrg = escapeHtml(organizationName).replace(/\*/g, '');
+            const answer =
+                `**Контрагент:** ${safeOrg}, ИНН **${inn}**\n\n` +
+                `**Ваш заказ:**\n\n${itemsList}\n\n**Итого: ${total} руб.**` +
+                mid +
+                `\n\nПо вопросам оплаты и доставки:${MANAGER_CONTACT}`;
+
+            return pushAndReturn(answer);
+        }
+
+        // 1️⃣ Старт: запрос счёта → сначала организация и ИНН
+        if (isInvoiceCommand(question)) {
+            const cart = getOrCreateCart(sessionId);
+
+            if (cart.items.length === 0) {
+                const answer =
+                    `Чтобы выписать счёт, сначала **добавьте товары в корзину**.\n\n` +
+                    `Например:\n` +
+                    `- "добавь сканер Атол"\n` +
+                    `- "положи в корзину весы МК-15"\n` +
+                    `- "покажи корзину"`;
+                return pushAndReturn(answer);
+            }
+
+            cart.invoiceDraft = { step: 'await_org' };
+            const answer =
+                `**На какую организацию вам удобно выставить счёт?**\n\n` +
+                `Напишите одним сообщением полное или краткое наименование. После этого спрошу **ИНН**.\n\n` +
+                `Отмена — слово **отмена**.`;
+            return pushAndReturn(answer);
         }
         
         // 2️⃣ ДОБАВЛЕНИЕ В КОРЗИНУ
@@ -352,11 +485,8 @@ export default async function handler(req, res) {
             if (found.length > 0) {
                 const product = found[0];
                 
-                if (!shoppingCarts.has(sessionId)) {
-                    shoppingCarts.set(sessionId, { items: [], timestamp: Date.now() });
-                }
-                const cart = shoppingCarts.get(sessionId);
-                
+                const cart = getOrCreateCart(sessionId);
+
                 const existing = cart.items.find(item => item.name === product.name);
                 if (existing) {
                     existing.quantity++;
@@ -374,7 +504,7 @@ export default async function handler(req, res) {
                 const answer = `✅ **${product.name}** добавлен в корзину.\n` +
                     `Цена: ${product.price} руб.\n\n` +
                     `В корзине сейчас ${cart.items.length} товаров на сумму ${cart.items.reduce((sum, item) => sum + cartLineTotal(item), 0)} руб.\n\n` +
-                    `Чтобы оформить заказ, напишите "выпиши счёт".`;
+                    `Чтобы оформить заказ, напишите **«выпиши счёт»** — спросим организацию и ИНН, затем отправим данные в 1С.`;
                 
                 session.messages.push({ role: 'user', content: question });
                 session.messages.push({ role: 'assistant', content: answer });
@@ -406,7 +536,7 @@ export default async function handler(req, res) {
                 const total = cart.items.reduce((sum, item) => sum + cartLineTotal(item), 0);
                 
                 answer = `**Ваша корзина:**\n\n${itemsList}\n\n**Итого: ${total} руб.**\n\n` +
-                    `Если хотите оформить заказ, напишите "выпиши счёт".`;
+                    `Если хотите оформить заказ, напишите **«выпиши счёт»** — уточним организацию и ИНН.`;
             } else {
                 answer = `Ваша корзина пуста. Добавьте товары, например: "добавь сканер" или "положи в корзину весы".`;
             }
