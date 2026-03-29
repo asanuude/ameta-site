@@ -118,7 +118,16 @@ export async function sendInvoiceRequestTo1C({ sessionId, items, counterparty })
             documentUrl,
         };
     } catch (e) {
-        const msg = e.name === 'AbortError' ? 'Таймаут ответа 1С' : e.message;
+        let msg =
+            e.name === 'AbortError' ? 'Таймаут 25 с — сервер 1С не ответил.' : String(e.message || e);
+        if (/^fetch failed$/i.test(msg) || /fetch failed/i.test(msg)) {
+            msg =
+                'Нет связи с 1С из облака сайта (URL недоступен, DNS, HTTPS или сертификат). Проверьте ONEC_INVOICE_WEBHOOK_URL на Vercel и откройте этот адрес из браузера с интернета.';
+        }
+        if (e.cause) {
+            console.error('[invoice-1c] cause:', e.cause);
+        }
+        console.error('[invoice-1c]', e.name, e.message);
         return { configured: true, ok: false, error: msg };
     } finally {
         clearTimeout(timer);
