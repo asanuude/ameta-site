@@ -143,8 +143,8 @@ function stripPastedAssistantCatalogLine(text) {
 /** Убирает «1 шт.», «3 штуки» и т.п. из запроса */
 function stripQuantityPhrases(text) {
     return String(text || '')
-        .replace(/\(\s*\d+\s*(?:шт\.?|штук(?:и|а)?|pcs?)\s*\)/gi, ' ')
-        .replace(/\b\d+\s*(?:шт\.?|штук(?:и|а)?|pcs?)\b/gi, ' ')
+        .replace(/\(\s*\d+\s*(?:шт\.?|штук(?:и|а|у)?|pcs?)\s*\)/gi, ' ')
+        .replace(/\b\d+\s*(?:шт\.?|штук(?:и|а|у)?|pcs?)\b/gi, ' ')
         .replace(/\([\s.]*\)/g, ' ')
         .replace(/^\d+\s+/, '')
         .replace(/\s+/g, ' ')
@@ -186,7 +186,7 @@ function stripCatalogNoise(text) {
 
 /** Количество из фразы «… 2 шт.» */
 function extractQuantityFromText(text) {
-    const m = String(text || '').match(/(\d+)\s*(?:шт\.?|штук(?:и|а)?)\b/i);
+    const m = String(text || '').match(/(\d+)\s*(?:шт\.?|штук(?:и|а|у)?)\b/i);
     if (!m) return 1;
     const n = parseInt(m[1], 10);
     if (!Number.isFinite(n)) return 1;
