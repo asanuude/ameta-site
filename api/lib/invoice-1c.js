@@ -8,8 +8,10 @@
  *     contract — опционально наименование договора; иначе берётся первый договор КА+организация,
  *     create_counterparty_if_missing — опционально (по умолчанию true на стороне 1С),
  *     post_document — опционально, провести заказ (bool),
- *     counterparty: { organizationName, inn },
+ *     counterparty: { organizationName, inn, phone },
  *     items: [{ nomenclatureId, sku, name, quantity, price }]
+ *     chat_transcript — опционально: текст истории диалога с клиентом (попадает в описание задачи менеджеру в 1С)
+ *     manager_user_name — опционально: часть имени пользователя 1С-исполнителя (по умолчанию из AMETA_1C_MANAGER_USER_NAME)
  *   }
  *   1С: создать «Заказ клиента», по нему — счёт; вернуть ссылки на PDF (и при необходимости печатную форму в браузере).
  *   Заголовок: Authorization: Bearer <ONEC_INVOICE_WEBHOOK_SECRET>
@@ -24,14 +26,22 @@
  * Идентификатор номенклатуры: nomenclatureId = поле id из catalog.json (Ид товара CommerceML).
  */
 
-export async function sendInvoiceRequestTo1C({ sessionId, items, counterparty }) {
+export async function sendInvoiceRequestTo1C({ sessionId, items, counterparty, chatTranscript }) {
+    const defaultOrganization = 'Гоблина Людмила Михайловна ИП';
+    const defaultContract = 'для вебсервиса';
     const url = (process.env.ONEC_INVOICE_WEBHOOK_URL || '').trim();
     const secret = (process.env.ONEC_INVOICE_WEBHOOK_SECRET || '').trim();
     if (!url || !secret) {
         return { configured: false };
     }
 
-    const organization = (process.env.AMETA_1C_ORGANIZATION_NAME || '').trim();
+    const rawOrganization = (process.env.AMETA_1C_ORGANIZATION_NAME || '').trim();
+    const organization =
+        !rawOrganization ||
+        rawOrganization.includes('?') ||
+        /ип\s+гоблина\s+людмила\s+михайловна/i.test(rawOrganization)
+            ? defaultOrganization
+            : rawOrganization;
     const urlNeedsSellerOrg = /ameta\/invoice/i.test(url);
     if (urlNeedsSellerOrg && !organization) {
         return {
@@ -40,7 +50,8 @@ export async function sendInvoiceRequestTo1C({ sessionId, items, counterparty })
             error: 'Задайте AMETA_1C_ORGANIZATION_NAME (наименование организации-продавца в 1С, как в справочнике Организации).',
         };
     }
-    const contract = (process.env.AMETA_1C_CONTRACT_NAME || '').trim();
+    const rawContract = (process.env.AMETA_1C_CONTRACT_NAME || '').trim();
+    const contract = !rawContract || rawContract.includes('?') ? defaultContract : rawContract;
     const postDocument =
         String(process.env.AMETA_1C_POST_ORDER || '').toLowerCase() === 'true' ||
         String(process.env.AMETA_1C_POST_ORDER || '').trim() === '1';
@@ -50,6 +61,8 @@ export async function sendInvoiceRequestTo1C({ sessionId, items, counterparty })
         String(process.env.AMETA_1C_CREATE_COUNTERPARTY).toLowerCase() === 'true' ||
         String(process.env.AMETA_1C_CREATE_COUNTERPARTY).trim() === '1';
 
+    const managerUserName = (process.env.AMETA_1C_MANAGER_USER_NAME || 'Алексей').trim();
+    const transcript = String(chatTranscript || '').trim();
     const payload = {
         sessionId,
         source: 'ameta-site',
@@ -61,6 +74,7 @@ export async function sendInvoiceRequestTo1C({ sessionId, items, counterparty })
         counterparty: {
             organizationName: counterparty?.organizationName || '',
             inn: counterparty?.inn || '',
+            phone: (counterparty?.phone || '').trim(),
         },
         items: items.map((i) => ({
             nomenclatureId: i.id || null,
@@ -69,19 +83,36 @@ export async function sendInvoiceRequestTo1C({ sessionId, items, counterparty })
             quantity: i.quantity,
             price: Number(i.price),
         })),
+        ...(transcript ? { chat_transcript: transcript.slice(0, 120000) } : {}),
+        manager_user_name: managerUserName,
     };
 
     const ac = new AbortController();
-    const timer = setTimeout(() => ac.abort(), 25000);
+    const requestTimeoutMs = 90000;
+    const timer = setTimeout(() => ac.abort(), requestTimeoutMs);
+    const useGetAdapter = /\/ameta\/invoice-get(?:[/?#]|$)/i.test(url);
 
     try {
-        const response = await fetch(url, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${secret}`,
-            },
-            body: JSON.stringify(payload),
+        const requestUrl = useGetAdapter
+            ? (() => {
+                  const finalUrl = new URL(url);
+                  const payloadBase64 = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64');
+                  finalUrl.searchParams.set('payload_b64', payloadBase64);
+                  return finalUrl.toString();
+              })()
+            : url;
+
+        const response = await fetch(requestUrl, {
+            method: useGetAdapter ? 'GET' : 'POST',
+            headers: useGetAdapter
+                ? {
+                      Authorization: `Bearer ${secret}`,
+                  }
+                : {
+                      'Content-Type': 'application/json',
+                      Authorization: `Bearer ${secret}`,
+                  },
+            ...(useGetAdapter ? {} : { body: JSON.stringify(payload) }),
             signal: ac.signal,
         });
 
@@ -123,7 +154,9 @@ export async function sendInvoiceRequestTo1C({ sessionId, items, counterparty })
         };
     } catch (e) {
         let msg =
-            e.name === 'AbortError' ? 'Таймаут 25 с — сервер 1С не ответил.' : String(e.message || e);
+            e.name === 'AbortError'
+                ? `Таймаут ${Math.round(requestTimeoutMs / 1000)} с — сервер 1С не ответил.`
+                : String(e.message || e);
         if (/^fetch failed$/i.test(msg) || /fetch failed/i.test(msg)) {
             msg =
                 'Нет связи с 1С из облака сайта (URL недоступен, DNS, HTTPS или сертификат). Проверьте ONEC_INVOICE_WEBHOOK_URL на Vercel и откройте этот адрес из браузера с интернета.';

@@ -229,14 +229,56 @@ import SpeedInsights from "@vercel/speed-insights/astro";
             cursor: not-allowed;
         }
 
+        .typing-status {
+            align-self: flex-start;
+            max-width: 92%;
+            padding: 0.85rem 1.1rem;
+            background: white;
+            border-radius: 20px;
+            border-bottom-left-radius: 4px;
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.2);
+            border: 1px solid rgba(102, 126, 234, 0.25);
+            animation: statusPulse 2s ease-in-out infinite;
+        }
+
+        @keyframes statusPulse {
+            0%, 100% { box-shadow: 0 2px 8px rgba(102, 126, 234, 0.2); }
+            50% { box-shadow: 0 4px 14px rgba(102, 126, 234, 0.35); }
+        }
+
+        .typing-status-line {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+            margin-bottom: 0.35rem;
+        }
+
+        .typing-status-title {
+            font-weight: 600;
+            color: #4c51bf;
+            font-size: 0.95rem;
+        }
+
+        .typing-elapsed {
+            font-variant-numeric: tabular-nums;
+            font-size: 0.85rem;
+            color: #718096;
+            white-space: nowrap;
+        }
+
+        .typing-hint {
+            margin: 0 0 0.5rem;
+            font-size: 0.88rem;
+            color: #4a5568;
+            line-height: 1.45;
+        }
+
         .typing-indicator {
             display: flex;
             gap: 0.3rem;
-            padding: 0.5rem 1rem;
-            background: white;
-            border-radius: 20px;
-            width: fit-content;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            padding: 0.15rem 0;
         }
 
         .typing-indicator span {
@@ -435,6 +477,54 @@ import SpeedInsights from "@vercel/speed-insights/astro";
                 localStorage.setItem(SESSION_KEY, sessionId);
             }
 
+            const WAIT_HINTS = [
+                'Подождите — запрос обрабатывается.',
+                'Система не зависла: идёт подбор ответа.',
+                'Иногда ответ занимает до 1–2 минут — это нормально.',
+                'При оформлении счёта связь с учётной системой может занять чуть больше времени.',
+            ];
+
+            /** Блок «думаю» с таймером и сменой подсказок — снимает ощущение «зависания». */
+            function appendTypingStatus() {
+                const wrap = document.createElement('div');
+                wrap.className = 'typing-status';
+                wrap.innerHTML =
+                    '<div class="typing-status-line">' +
+                    '<span class="typing-status-title">Думаю над ответом…</span>' +
+                    '<span class="typing-elapsed">0:00</span></div>' +
+                    '<p class="typing-hint"></p>' +
+                    '<div class="typing-indicator"><span></span><span></span><span></span></div>';
+
+                const elapsedEl = wrap.querySelector('.typing-elapsed');
+                const hintEl = wrap.querySelector('.typing-hint');
+                hintEl.textContent = WAIT_HINTS[0];
+
+                messagesDiv.appendChild(wrap);
+                messagesDiv.scrollTop = messagesDiv.scrollHeight;
+
+                let sec = 0;
+                let hintIndex = 0;
+                const timerIv = setInterval(function () {
+                    sec += 1;
+                    const m = Math.floor(sec / 60);
+                    const s = sec % 60;
+                    elapsedEl.textContent = m + ':' + (s < 10 ? '0' : '') + s;
+                }, 1000);
+
+                const hintIv = setInterval(function () {
+                    hintIndex = (hintIndex + 1) % WAIT_HINTS.length;
+                    hintEl.textContent = WAIT_HINTS[hintIndex];
+                }, 4500);
+
+                return {
+                    remove: function () {
+                        clearInterval(timerIv);
+                        clearInterval(hintIv);
+                        wrap.remove();
+                    },
+                };
+            }
+
             // Функция добавления сообщения
             function addMessage(text, isUser = false) {
                 const messageDiv = document.createElement('div');
@@ -475,11 +565,7 @@ import SpeedInsights from "@vercel/speed-insights/astro";
                 addMessage(text, true);
                 userInput.value = '';
 
-                const typingIndicator = document.createElement('div');
-                typingIndicator.className = 'typing-indicator';
-                typingIndicator.innerHTML = '<span></span><span></span><span></span>';
-                messagesDiv.appendChild(typingIndicator);
-                messagesDiv.scrollTop = messagesDiv.scrollHeight;
+                const typing = appendTypingStatus();
 
                 try {
                     const lastUserProductQuery =
@@ -495,7 +581,7 @@ import SpeedInsights from "@vercel/speed-insights/astro";
                     });
 
                     const data = await response.json();
-                    typingIndicator.remove();
+                    typing.remove();
                     addMessage(data.answer || 'Пустой ответ от сервера');
 
                     const t = text;
@@ -509,7 +595,7 @@ import SpeedInsights from "@vercel/speed-insights/astro";
                         localStorage.setItem(LAST_USER_Q_KEY, t);
                     }
                 } catch (error) {
-                    typingIndicator.remove();
+                    typing.remove();
                     addMessage('Произошла ошибка связи с сервером. Пожалуйста, попробуйте ещё раз.');
                     console.error('Send error:', error);
                 } finally {
@@ -535,13 +621,10 @@ import SpeedInsights from "@vercel/speed-insights/astro";
                         mediaRecorder.onstop = async () => {
                             addMessage('🎤 (Голосовое сообщение)', true);
                             
-                            const typingIndicator = document.createElement('div');
-                            typingIndicator.className = 'typing-indicator';
-                            typingIndicator.innerHTML = '<span></span><span></span><span></span>';
-                            messagesDiv.appendChild(typingIndicator);
+                            const typing = appendTypingStatus();
                             
                             setTimeout(() => {
-                                typingIndicator.remove();
+                                typing.remove();
                                 addMessage('Извините, распознавание голоса временно не работает. Пожалуйста, напишите ваш вопрос.');
                             }, 2000);
 

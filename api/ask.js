@@ -38,6 +38,18 @@ setInterval(() => {
     }
 }, 60 * 60 * 1000);
 
+/** Текст для поля «Описание» задачи менеджеру в 1С (история чата). */
+function formatDialogTranscriptFor1C(messages) {
+    if (!Array.isArray(messages) || messages.length === 0) return '';
+    const lines = [];
+    for (const m of messages) {
+        const role = m.role === 'assistant' ? 'Консультант' : 'Клиент';
+        const text = String(m.content || '').trim();
+        if (text) lines.push(`${role}: ${text}`);
+    }
+    return lines.join('\n\n');
+}
+
 let catalog = null;
 let lastFetch = 0;
 const CACHE_TTL = 5 * 60 * 1000;
@@ -118,6 +130,18 @@ function isInvoiceCommand(q) {
 function parseRussianInn(text) {
     const d = String(text).replace(/\D/g, '');
     if (d.length === 10 || d.length === 12) return d;
+    return null;
+}
+
+/** Телефон для связи: не меньше 10 цифр (допускаются +7, 8, пробелы и скобки). */
+function parseContactPhone(text) {
+    let d = String(text || '').replace(/\D/g, '');
+    if (d.length === 11 && d.startsWith('8')) {
+        d = '7' + d.slice(1);
+    }
+    if (d.length >= 10) {
+        return d;
+    }
     return null;
 }
 
@@ -656,7 +680,7 @@ export default async function handler(req, res) {
             );
         }
 
-        // Ответ с ИНН → вызов 1С (заказ + счёт)
+        // Ответ с ИНН → шаг телефона
         if (cartExisting?.invoiceDraft?.step === 'await_inn') {
             if (!cartExisting.items?.length) {
                 cartExisting.invoiceDraft = null;
@@ -674,6 +698,38 @@ export default async function handler(req, res) {
                 );
             }
             const organizationName = cartExisting.invoiceDraft.organizationName || '';
+            cartExisting.invoiceDraft = {
+                step: 'await_phone',
+                organizationName,
+                inn,
+            };
+            cartExisting.timestamp = Date.now();
+            const safeOrg = escapeHtml(organizationName).replace(/\*/g, '');
+            return pushAndReturn(
+                `${safeOrg}, ИНН **${inn}**\n\n` +
+                    `**Телефон для связи** (мобильный или городской, не меньше 10 цифр). **Отмена** — прервать.`
+            );
+        }
+
+        // Телефон → вызов 1С (заказ + счёт)
+        if (cartExisting?.invoiceDraft?.step === 'await_phone') {
+            if (!cartExisting.items?.length) {
+                cartExisting.invoiceDraft = null;
+                return pushAndReturn('Корзина пуста — начните с добавления товаров.');
+            }
+            if (isInvoiceCommand(question)) {
+                return pushAndReturn(
+                    'Сейчас нужен **телефон** для связи. Введите номер одним сообщением или напишите **отмена**.'
+                );
+            }
+            const phone = parseContactPhone(question);
+            if (!phone) {
+                return pushAndReturn(
+                    'Телефон не распознан. Укажите **не меньше 10 цифр** (например +7 903 123-45-67).'
+                );
+            }
+            const organizationName = cartExisting.invoiceDraft.organizationName || '';
+            const inn = cartExisting.invoiceDraft.inn || '';
             cartExisting.invoiceDraft = null;
             cartExisting.timestamp = Date.now();
 
@@ -685,10 +741,14 @@ export default async function handler(req, res) {
                 .join('\n');
             const total = cartExisting.items.reduce((sum, item) => sum + cartLineTotal(item), 0);
 
+            const dialogFor1c = [...session.messages, { role: 'user', content: question }];
+            const chatTranscript = formatDialogTranscriptFor1C(dialogFor1c);
+
             const onec = await sendInvoiceRequestTo1C({
                 sessionId,
                 items: cartExisting.items,
-                counterparty: { organizationName, inn },
+                counterparty: { organizationName, inn, phone },
+                chatTranscript,
             });
 
             let mid = '';
@@ -707,8 +767,9 @@ export default async function handler(req, res) {
             }
 
             const safeOrg = escapeHtml(organizationName).replace(/\*/g, '');
+            const safePhone = escapeHtml(phone).replace(/\*/g, '');
             const answer =
-                `${safeOrg}, ИНН **${inn}**\n\n${itemsList}\n**Итого: ${total} руб.**` +
+                `${safeOrg}, ИНН **${inn}**, тел. **${safePhone}**\n\n${itemsList}\n**Итого: ${total} руб.**` +
                 mid +
                 (onec.ok ? `\n\nВопросы:${MANAGER_CONTACT}` : `\n\n${MANAGER_CONTACT}`);
 
@@ -750,7 +811,7 @@ export default async function handler(req, res) {
             const lines = cart.items
                 .map((i) => `- **${i.name}** — ${i.quantity} шт. (${cartLineTotal(i)} руб.)`)
                 .join('\n');
-            const answer = `В счёте:\n${lines}\n\n**Наименование организации** (потом ИНН). **Отмена** — отменить.`;
+            const answer = `В счёте:\n${lines}\n\n**Наименование организации**, затем **ИНН** и **телефон для связи**. **Отмена** — отменить.`;
             return pushAndReturn(answer);
         }
         
@@ -789,7 +850,7 @@ export default async function handler(req, res) {
                 const answer = `✅ **${product.name}** добавлен в корзину.\n` +
                     `Цена: ${product.price} руб.\n\n` +
                     `В корзине сейчас ${cart.items.length} товаров на сумму ${cart.items.reduce((sum, item) => sum + cartLineTotal(item), 0)} руб.\n\n` +
-                    `Чтобы оформить заказ, напишите **«выпиши счёт»** — спросим организацию и ИНН, затем отправим данные в 1С.`;
+                    `Чтобы оформить заказ, напишите **«выпиши счёт»** — спросим организацию, ИНН и телефон, затем отправим данные в 1С.`;
                 
                 session.messages.push({ role: 'user', content: question });
                 session.messages.push({ role: 'assistant', content: answer });
@@ -827,7 +888,7 @@ export default async function handler(req, res) {
                 const total = cart.items.reduce((sum, item) => sum + cartLineTotal(item), 0);
                 
                 answer = `**Ваша корзина:**\n\n${itemsList}\n\n**Итого: ${total} руб.**\n\n` +
-                    `Если хотите оформить заказ, напишите **«выпиши счёт»** — уточним организацию и ИНН.`;
+                    `Если хотите оформить заказ, напишите **«выпиши счёт»** — уточним организацию, ИНН и телефон.`;
             } else {
                 answer = `Ваша корзина пуста. Добавьте товары, например: "добавь сканер" или "положи в корзину весы".`;
             }

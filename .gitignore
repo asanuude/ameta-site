@@ -25,3 +25,7 @@ tools/gh/
 
 # Секреты вебхука 1С (копия без точки в имени — см. ИНСТРУКЦИЯ-вебхук-Vercel-1С.txt)
 webhook-env-FOR-VERCEL-COPY.txt
+
+# Никогда не хранить учётки в репозитории
+111.txt
+*-credentials.txt
