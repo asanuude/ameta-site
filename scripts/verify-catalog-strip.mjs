@@ -1,8 +1,11 @@
 /** Локальная проверка цепочки strip + findBestCatalogMatch (node scripts/verify-catalog-strip.mjs) */
+import { enrichCatalog } from '../api/lib/catalog-enrich.js';
+
 function normalizeCatalogToken(s) {
     return String(s || '')
         .toLowerCase()
         .replace(/ё/g, 'е')
+        .replace(/(\d)\s*x(?=\s|$|[^\wа-яё])/gi, '$1х')
         .replace(/[-–—_/]+/g, ' ')
         .replace(/\s+/g, ' ')
         .trim();
@@ -53,12 +56,13 @@ function findBestCatalogMatch(rawQuery, inStockProducts) {
     const pool = inStockProducts.map((p) => ({
         p,
         n: normalizeCatalogToken(p.name || ''),
+        h: p._searchHaystack || normalizeCatalogToken(p.name || ''),
     }));
-    let hits = pool.filter(({ n }) => n.includes(q));
+    let hits = pool.filter(({ n, h }) => h.includes(q) || n.includes(q));
     if (hits.length === 0) {
         const tokens = q.split(' ').filter((t) => t.length >= 2);
         if (tokens.length === 0) return null;
-        hits = pool.filter(({ n }) => tokens.every((t) => n.includes(t)));
+        hits = pool.filter(({ n, h }) => tokens.every((t) => h.includes(t) || n.includes(t)));
     }
     if (hits.length === 0) return null;
     hits.sort((a, b) => a.n.length - b.n.length || String(a.p.name).localeCompare(String(b.p.name), 'ru'));
@@ -70,7 +74,9 @@ let forMatch = question.replace(/добавь|положи|в\s+корзину/g
 forMatch = stripCatalogNoise(forMatch);
 forMatch = stripQuantityPhrases(forMatch);
 forMatch = stripInvoicePhrases(forMatch);
-const products = [{ name: 'Мясорубка  МИМ-80', price: 62880, quantity: 1, id: 'x' }];
+const products = enrichCatalog([
+    { name: 'Мясорубка  МИМ-80', price: 62880, quantity: 1, id: 'x' },
+]);
 const m = findBestCatalogMatch(forMatch, products);
 console.log('stripped forMatch:', JSON.stringify(forMatch));
 console.log('match:', m?.name || null);

@@ -2,6 +2,7 @@
 // Локально: скопируйте .env.example → .env.local и заполните.
 
 import { sendInvoiceRequestTo1C } from './lib/invoice-1c.js';
+import { enrichCatalog } from './lib/catalog-enrich.js';
 
 const MANAGER_CONTACT =
     '\n📞 Телефон: +7 (3012) 333-000\n📧 Email: sales@ameta.online';
@@ -67,7 +68,8 @@ async function loadCatalog() {
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
         lastFetch = now;
-        catalog = Array.isArray(data) ? data : (data.products || []);
+        const raw = Array.isArray(data) ? data : (data.products || []);
+        catalog = enrichCatalog(raw);
         return catalog;
     } catch (error) {
         return catalog || [];
@@ -229,6 +231,175 @@ function extractQuantityFromText(text) {
 /**
  * Подбор одной позиции из каталога (в наличии): подстрока или все значимые токены в наименовании.
  */
+/** Служебные слова запроса «покажи в наличии», не из названия товара */
+function stripCatalogBrowseNoise(text) {
+    return String(text || '')
+        .replace(/\b(?:в\s+)?наличии\b/gi, ' ')
+        .replace(
+            /\b(?:подскажи|покажи|дайте?|дай|список|какие|какой|какая|какое|что\s+есть|есть\s+ли|что\s+у\s+вас|что\s+за|нужны?|нужен|нужна|хочу|посмотреть|интересуют|интересует|можете|можно|могу|могут|предложить|предложите|порекомендуйте|посоветуйте|расскажите|подскажите|на\s+сайте|сайт|вебсайт|весь|всю|все|всего|ассортимент|каталог|номенклатур|товары|продаете|продаёте|имеется|имеете)\b/gi,
+            ' '
+        )
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+/** Токены вопроса, не участвующие в сопоставлении с наименованием */
+const CATALOG_QUERY_STOPWORDS = new Set(
+    [
+        'какие',
+        'какой',
+        'какая',
+        'какое',
+        'что',
+        'где',
+        'есть',
+        'ли',
+        'для',
+        'вас',
+        'вам',
+        'нам',
+        'сайте',
+        'сайт',
+        'вебсайт',
+        'можете',
+        'можно',
+        'могу',
+        'могут',
+        'предложить',
+        'предложите',
+        'подскажите',
+        'расскажите',
+        'посоветуйте',
+        'товары',
+        'товар',
+        'все',
+        'весь',
+        'всю',
+        'всего',
+        'каталог',
+        'ассортимент',
+        'номенклатур',
+        'продаете',
+        'продаёте',
+        'подскажи',
+        'покажи',
+        'дай',
+        'дайте',
+        'список',
+        'нужен',
+        'нужна',
+        'нужны',
+        'хочу',
+        'посмотреть',
+        'интересует',
+        'интересуют',
+        'имеется',
+        'имеете',
+        'наличии',
+        'в',
+        'на',
+        'по',
+        'из',
+        'у',
+        'и',
+        'или',
+        'а',
+        'не',
+        'то',
+    ]
+);
+
+function catalogQueryTokens(qNorm) {
+    return String(qNorm || '')
+        .split(' ')
+        .filter((t) => t.length >= 2 && !CATALOG_QUERY_STOPWORDS.has(t));
+}
+
+/** Общий вопрос «что есть на сайте / в каталоге» — показать выборку без узкого фильтра */
+function isBroadCatalogListingIntent(question) {
+    const raw = String(question || '').toLowerCase();
+    return (
+        /(?:какие|что|какой)\s+(?:товар|товары|есть)|товар(?:ы)?\s+(?:есть|на\s+сайте)|на\s+сайте|весь\s+каталог|все\s+товары|что\s+(?:у\s+вас|есть|прода)|ассортимент|номенклатур|что\s+можно\s+купить/i.test(
+            raw
+        )
+    );
+}
+
+const BROWSE_FALLBACK_CAP = 100;
+
+function resolveMatchedForPaging(question, productsForAI) {
+    let matched = findAllCatalogMatches(question, productsForAI);
+    if (matched.length >= CATALOG_PAGED_MIN) {
+        return matched;
+    }
+    if (productsForAI.length < CATALOG_PAGED_MIN) {
+        return matched;
+    }
+    if (isBroadCatalogListingIntent(question)) {
+        return productsForAI.slice(0, BROWSE_FALLBACK_CAP);
+    }
+    return matched;
+}
+
+/**
+ * Все позиции каталога по запросу (для пагинации на клиенте). Логика фильтра как у findBestCatalogMatch, но без выбора одной «лучшей».
+ */
+function findAllCatalogMatches(rawQuery, inStockProducts) {
+    let q = String(rawQuery || '')
+        .replace(/добавь|положи|в\s+корзину|пожалуйста/gi, ' ')
+        .trim();
+    q = stripCatalogNoise(q);
+    q = stripQuantityPhrases(q);
+    q = stripInvoicePhrases(q);
+    q = stripCatalogBrowseNoise(q);
+    q = normalizeCatalogToken(q);
+    if (!q || q.length < 2) return [];
+
+    const pool = inStockProducts.map((p) => ({
+        p,
+        n: normalizeCatalogToken(p.name || ''),
+        h: p._searchHaystack || normalizeCatalogToken(p.name || ''),
+    }));
+
+    let hits = pool.filter(({ n, h }) => h.includes(q) || n.includes(q));
+    if (hits.length === 0) {
+        const tokens = catalogQueryTokens(q);
+        if (tokens.length === 0) return [];
+        hits = pool.filter(({ n, h }) => tokens.every((t) => h.includes(t) || n.includes(t)));
+    }
+    if (hits.length === 0) return [];
+
+    hits.sort((a, b) => String(a.p.name).localeCompare(String(b.p.name), 'ru'));
+    return hits.map((x) => x.p);
+}
+
+function serializeCatalogItem(p) {
+    return {
+        id: p.id || '',
+        sku: p.sku || '',
+        name: p.name || '',
+        price: p.price,
+        quantity: p.quantity,
+    };
+}
+
+/** Полный нумерованный список для истории диалога (счёт, «пункт N»). */
+function formatSessionCatalogMarkdown(products) {
+    return products
+        .map((p, i) => {
+            const nm = sanitizeCatalogNameForAI(p.name);
+            return `${i + 1}. ${nm} | Цена: ${p.price} руб. | В наличии: ${p.quantity} шт.`;
+        })
+        .join('\n');
+}
+
+const CATALOG_PAGED_MIN = 4;
+const CATALOG_PAGE_SIZE_DEFAULT = 5;
+
+const SHORT_INTRO_SYSTEM = `Ты — консультант AMETA по торговому оборудованию. Клиент увидит список товаров отдельным блоком на сайте.
+Ответь ТОЛЬКО 1–2 коротких предложения по смыслу вопроса, дружелюбно.
+ЗАПРЕЩЕНО: нумерованные списки, перечисление наименований и цен, таблицы. Не более 380 символов.`;
+
 function findBestCatalogMatch(rawQuery, inStockProducts) {
     let q = String(rawQuery || '')
         .replace(/добавь|положи|в\s+корзину|пожалуйста/gi, ' ')
@@ -236,19 +407,21 @@ function findBestCatalogMatch(rawQuery, inStockProducts) {
     q = stripCatalogNoise(q);
     q = stripQuantityPhrases(q);
     q = stripInvoicePhrases(q);
+    q = stripCatalogBrowseNoise(q);
     q = normalizeCatalogToken(q);
     if (!q || q.length < 2) return null;
 
     const pool = inStockProducts.map((p) => ({
         p,
         n: normalizeCatalogToken(p.name || ''),
+        h: p._searchHaystack || normalizeCatalogToken(p.name || ''),
     }));
 
-    let hits = pool.filter(({ n }) => n.includes(q));
+    let hits = pool.filter(({ n, h }) => h.includes(q) || n.includes(q));
     if (hits.length === 0) {
-        const tokens = q.split(' ').filter((t) => t.length >= 2);
+        const tokens = catalogQueryTokens(q);
         if (tokens.length === 0) return null;
-        hits = pool.filter(({ n }) => tokens.every((t) => n.includes(t)));
+        hits = pool.filter(({ n, h }) => tokens.every((t) => h.includes(t) || n.includes(t)));
     }
     if (hits.length === 0) return null;
 
@@ -383,57 +556,23 @@ function getRandomProducts(products, count = 3) {
     return inStock.sort(() => 0.5 - Math.random()).slice(0, count);
 }
 
-// Подсказки: вопрос → подстроки в наименовании (каталог 4000+ позиций — в модель нельзя слать только «первые 200»)
-const CATALOG_QUERY_HINTS = [
-    {
-        test: /касс|ккт|ккм|рро|фр\s|фиск|онлайн[\s-]?касс|чеков|эвотор|evotor|атол|atol|штрих|дримкас|арчер|каспик|автономн|регистратор|фн\s|офд/i,
-        keys: [
-            'ккм', 'касс', 'ккт', 'рро', 'фр-', 'фр ', 'фиск', 'онлайн', 'эвотор', 'evotor', 'атол', 'atol',
-            'штрих', 'дримкас', 'арчер', 'каспик', 'pos', 'pos-', 'фн', 'офд', 'чек', 'каспро', 'viki',
-            'смарт-терминал', 'терминал сбора', 'тсд', 'fprint', 'pay', 'pax', 'ingenico'
-        ]
-    },
-    {
-        test: /вес|вэ[тн]|вр\s|масса|торговые вес/i,
-        keys: ['вес', 'вэт', 'вр-', 'мк-', 'масса-к', 'электронн', 'торгов', 'платформ', 'штуц', 'днепр']
-    },
-    {
-        test: /сканер|штрих[\s-]?код|barcode|2d[\s-]?скан/i,
-        keys: ['скан', 'штрих', 'barcode', 'honeywell', 'zebra', 'cipher', 'symbol']
-    },
-    {
-        test: /принтер|печат|чековая лента|этикетк/i,
-        keys: ['принтер', 'печат', 'fprint', 'этикет', 'термо', 'чеков']
-    },
-    {
-        test: /мясоруб/i,
-        keys: ['мясоруб']
-    },
-    {
-        test: /холодиль|морозиль|рефриж|ларь|лари|ледоген|фризер|freezer|холодн.*шкаф|шкаф.*холод/i,
-        keys: [
-            'холодиль',
-            'морозиль',
-            'рефриж',
-            'морозил',
-            'ларь',
-            'холодн',
-            'морозн',
-            'ледоген',
-            'фризер',
-            'freezer',
-        ]
-    },
-    {
-        test: /моноблок|pos[\s-]?комп|кассовый комп/i,
-        keys: ['моноблок', 'pos', 'кассов', 'комп']
+/** Лимит строк каталога в промпте ИИ: пусто / all / full = весь каталог; иначе положительное число. */
+function parseAskCatalogMaxItems() {
+    const raw = process.env.ASK_CATALOG_MAX_ITEMS;
+    if (raw === undefined || raw === null || String(raw).trim() === '') {
+        return Infinity;
     }
-];
-
-const CATALOG_AI_MAX_ITEMS = Math.min(
-    500,
-    Math.max(200, parseInt(process.env.ASK_CATALOG_MAX_ITEMS || '400', 10) || 400)
-);
+    const s = String(raw).trim().toLowerCase();
+    if (s === 'all' || s === 'full') {
+        return Infinity;
+    }
+    const n = parseInt(s, 10);
+    if (!Number.isFinite(n) || n <= 0) {
+        return Infinity;
+    }
+    return n;
+}
+const ASK_CATALOG_MAX_ITEMS_EFFECTIVE = parseAskCatalogMaxItems();
 
 /** Имя в строке каталога для ИИ: не ломать разделитель « | Цена: » */
 function sanitizeCatalogNameForAI(name) {
@@ -444,91 +583,35 @@ function sanitizeCatalogNameForAI(name) {
         .trim();
 }
 
-/** Если точное слово не встречается в названиях (мн. ч.), пробуем короче */
-function expandSearchTokens(tokens) {
-    const out = new Set();
-    for (const t of tokens) {
-        if (t.length < 3) continue;
-        out.add(t);
-        if (t.length >= 8) {
-            out.add(t.slice(0, -1));
-            out.add(t.slice(0, -2));
-        } else if (t.length >= 6) {
-            out.add(t.slice(0, -1));
-        }
-    }
-    return [...out];
+/** Одна позиция в контексте модели: цена, остаток, автосинонимы и ручные aliases из JSON. */
+function formatCatalogLineForAI(p) {
+    const nm = sanitizeCatalogNameForAI(p.name);
+    const base = `- ${nm} | Цена: ${p.price} руб. | В наличии: ${p.quantity} шт.`;
+    const aliases = Array.isArray(p._aliases) ? p._aliases : [];
+    const nameNorm = normalizeCatalogToken(p.name || '');
+    const show = aliases
+        .filter((a) => normalizeCatalogToken(a) !== nameNorm)
+        .slice(0, 18);
+    if (!show.length) return base;
+    return `${base} | Поиск: ${show.join(', ')}`;
 }
 
 /**
- * Подмножество каталога под конкретный вопрос; иначе срез с начала (как раньше).
- * @returns {{ products: object[], source: 'filtered'|'tokens'|'head' }}
+ * Весь каталог (в наличии) в контекст консультанта, без усечения по теме запроса.
+ * @returns {{ products: object[], source: 'full'|'capped' }}
  */
-function selectProductsForConsultant(question, inStockProducts) {
-    const q = (question || '').toLowerCase();
-    const nameMatch = (p, keys) => {
-        const n = (p.name || '').toLowerCase();
-        return keys.some((k) => n.includes(k.toLowerCase()));
-    };
-
-    for (const hint of CATALOG_QUERY_HINTS) {
-        if (hint.test.test(question)) {
-            const hit = inStockProducts.filter((p) => nameMatch(p, hint.keys));
-            if (hit.length > 0) {
-                return { products: hit.slice(0, CATALOG_AI_MAX_ITEMS), source: 'filtered' };
-            }
-            break;
-        }
+function selectProductsForConsultant(_question, inStockProducts) {
+    let list = inStockProducts;
+    if (
+        Number.isFinite(ASK_CATALOG_MAX_ITEMS_EFFECTIVE) &&
+        ASK_CATALOG_MAX_ITEMS_EFFECTIVE < list.length
+    ) {
+        return {
+            products: list.slice(0, ASK_CATALOG_MAX_ITEMS_EFFECTIVE),
+            source: 'capped',
+        };
     }
-
-    const stop = new Set([
-        'какие',
-        'какой',
-        'какая',
-        'какое',
-        'есть',
-        'наличии',
-        'наличие',
-        'сколько',
-        'что',
-        'мне',
-        'нас',
-        'вас',
-        'про',
-        'для',
-        'или',
-        'ли',
-        'все',
-        'весь',
-        'покажи',
-        'подскажи',
-        'скажи',
-        'хочу',
-        'нужен',
-        'нужна',
-        'нужно',
-        'дайте',
-        'можно'
-    ]);
-    const tokens = q
-        .split(/[^a-zа-яё0-9]+/i)
-        .map((t) => t.trim())
-        .filter((t) => t.length >= 3 && !stop.has(t));
-
-    if (tokens.length > 0) {
-        const tryTokens = (toks) =>
-            inStockProducts.filter((p) => {
-                const n = (p.name || '').toLowerCase();
-                return toks.some((t) => n.includes(t));
-            });
-        let hit = tryTokens(tokens);
-        if (hit.length === 0) hit = tryTokens(expandSearchTokens(tokens));
-        if (hit.length > 0) {
-            return { products: hit.slice(0, CATALOG_AI_MAX_ITEMS), source: 'tokens' };
-        }
-    }
-
-    return { products: inStockProducts.slice(0, CATALOG_AI_MAX_ITEMS), source: 'head' };
+    return { products: list, source: 'full' };
 }
 
 // АВТОМАТИЧЕСКОЕ ОПРЕДЕЛЕНИЕ КАТЕГОРИЙ
@@ -903,8 +986,9 @@ export default async function handler(req, res) {
         const systemPrompt = `Ты — консультант AMETA (торговое и кухонное оборудование, кассы, весы, холод, склад).
 
 ФОРМАТ: 1–2 коротких предложения + нумерованный список. В каждой позиции **полное наименование** из каталога (как в строке до « | Цена:»), цена и остаток — **точно как в строке**. Не обрывай название на скобке «(» или на «2D |». Символ ¦ в названии заменяет вертикальную черту.
+В каждой строке каталога может быть поле **«Поиск:»** — это синонимы, артикулы и варианты написания; используй их, чтобы сопоставить вопрос клиента с позицией.
 Не пиши общих фраз вроде «у нас всё хорошо» или выдуманных новостей компании.
-Если в списке нет подходящих позиций — одна фраза: в этой выборке нет, предложи уточнить тип/бренд; не утверждай, что товара нет во всём магазине.
+Если в **переданном ниже** списке нет подходящей позиции — одна фраза: совпадений нет, предложи уточнить тип/бренд/артикул; не утверждай, что товара нет на складе, если его не было в этом списке.
 Контакты менеджера — только по запросу счёта/доставки или если список пуст.
 После списка одна строка: счёт — «счёт на [точное название]» или «добавь [название] в корзину».`;
 
@@ -949,16 +1033,66 @@ export default async function handler(req, res) {
             inStockProducts
         );
         console.log('🔍 ТОВАРОВ ПЕРЕДАНО AI:', productsForAI.length, 'источник:', catalogSource);
-        
+
+        const matchedForPaging = resolveMatchedForPaging(question, productsForAI);
+        if (matchedForPaging.length >= CATALOG_PAGED_MIN) {
+            let intro = '';
+            if (OPENROUTER_API_KEY) {
+                try {
+                    const introRes = await fetch(OPENROUTER_URL, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            Authorization: `Bearer ${OPENROUTER_API_KEY}`,
+                            'HTTP-Referer': SITE_URL,
+                        },
+                        body: JSON.stringify({
+                            model: OPENROUTER_MODEL,
+                            messages: [
+                                { role: 'system', content: SHORT_INTRO_SYSTEM },
+                                {
+                                    role: 'user',
+                                    content:
+                                        `Вопрос клиента: "${question}"\n\n` +
+                                        `По каталогу подобрано позиций: ${matchedForPaging.length}. Список товаров покажет интерфейс сайта (не перечисляй товары).`,
+                                },
+                            ],
+                            temperature: 0.3,
+                            max_tokens: 400,
+                        }),
+                    });
+                    if (introRes.ok) {
+                        const jd = await introRes.json();
+                        intro = (jd.choices?.[0]?.message?.content || '').trim();
+                    }
+                } catch (e) {
+                    console.error('short intro AI:', e);
+                }
+            }
+            if (!intro || intro.length < 12) {
+                intro =
+                    `Нашёл **${matchedForPaging.length}** позиций по запросу. Список ниже — листайте кнопкой **«Дальше»**.`;
+            }
+            const fullList = formatSessionCatalogMarkdown(matchedForPaging);
+            const assistantFull =
+                `${intro}\n\n${fullList}\n\n` +
+                `Счёт — «счёт на [точное название из списка]» или «добавь [название] в корзину».`;
+            session.messages.push({ role: 'user', content: question });
+            session.messages.push({ role: 'assistant', content: assistantFull });
+            if (session.messages.length > 20) {
+                session.messages = session.messages.slice(-20);
+            }
+            return res.status(200).json({
+                answer: intro,
+                catalogItems: matchedForPaging.map(serializeCatalogItem),
+                catalogPageSize: CATALOG_PAGE_SIZE_DEFAULT,
+            });
+        }
+
         const catalogContext =
             productsForAI.length > 0
-                ? productsForAI
-                      .map((p) => {
-                          const nm = sanitizeCatalogNameForAI(p.name);
-                          return `- ${nm} | Цена: ${p.price} руб. | В наличии: ${p.quantity} шт.`;
-                      })
-                      .join('\n')
-                : '(список пуст — под запрос не найдено позиций в наличии в каталоге)';
+                ? productsForAI.map((p) => formatCatalogLineForAI(p)).join('\n')
+                : '(список пуст — нет позиций в наличии в каталоге)';
         
         // Добавляем историю диалога (последние 6 сообщений)
         const recentMessages = session.messages.slice(-6);
@@ -986,7 +1120,7 @@ export default async function handler(req, res) {
                         ...recentMessages,
                         {
                             role: 'user',
-                            content: `Каталог (режим ${catalogSource}, в базе ~${inStockProducts.length} позиций, здесь до ${CATALOG_AI_MAX_ITEMS} строк). Копируй наименование целиком до « | Цена:».\n\n${catalogContext}\n\nВопрос: "${question}"\n\nОтветь только по этим строкам.`
+                            content: `Каталог (режим ${catalogSource}: ${productsForAI.length} позиций в наличии в этом сообщении). В каждой строке — наименование, цена, остаток; поле «Поиск:» — синонимы и варианты для подбора. Копируй наименование целиком до « | Цена:».\n\n${catalogContext}\n\nВопрос: "${question}"\n\nОтветь только по этим строкам.`
                         }
                     ],
                     temperature: 0.25,

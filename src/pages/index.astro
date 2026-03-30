@@ -140,6 +140,82 @@ import SpeedInsights from "@vercel/speed-insights/astro";
             margin-left: 1rem;
         }
 
+        .catalog-paged-wrap {
+            max-width: 100%;
+        }
+
+        .catalog-intro {
+            margin-bottom: 0.75rem;
+        }
+
+        .catalog-item-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0.65rem;
+            margin: 0.5rem 0 0.35rem;
+        }
+
+        .catalog-item-row {
+            display: flex;
+            gap: 0.5rem;
+            align-items: flex-start;
+            padding: 0.55rem 0.65rem;
+            background: #f8f9fc;
+            border-radius: 12px;
+            border: 1px solid #e8eaf4;
+        }
+
+        .catalog-item-num {
+            font-weight: 700;
+            color: #667eea;
+            flex-shrink: 0;
+            min-width: 1.5rem;
+        }
+
+        .catalog-item-body {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .catalog-item-name {
+            font-weight: 500;
+            margin-bottom: 0.25rem;
+            word-wrap: break-word;
+        }
+
+        .catalog-item-meta {
+            font-size: 0.88rem;
+            color: #555;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem 1rem;
+        }
+
+        .catalog-item-footer {
+            font-size: 0.82rem;
+            color: #718096;
+            margin-top: 0.25rem;
+        }
+
+        .catalog-btn-row {
+            margin-top: 0.65rem;
+        }
+
+        .catalog-more-btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #fff;
+            border: none;
+            border-radius: 999px;
+            padding: 0.5rem 1.25rem;
+            font-size: 0.95rem;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .catalog-more-btn:hover {
+            filter: brightness(1.05);
+        }
+
         .input-area {
             padding: 1rem;
             background: white;
@@ -484,6 +560,116 @@ import SpeedInsights from "@vercel/speed-insights/astro";
                 'При оформлении счёта связь с учётной системой может занять чуть больше времени.',
             ];
 
+            function escapeHtmlClient(s) {
+                const d = document.createElement('div');
+                d.textContent = s == null ? '' : String(s);
+                return d.innerHTML;
+            }
+
+            function formatPriceRu(p) {
+                if (typeof p === 'number' && Number.isFinite(p)) {
+                    return p.toLocaleString('ru-RU');
+                }
+                const n = parseFloat(String(p).replace(/\s/g, '').replace(',', '.'));
+                if (Number.isFinite(n)) return n.toLocaleString('ru-RU');
+                return String(p);
+            }
+
+            /** Длинный список каталога: по pageSize позиций и кнопка «Дальше». */
+            function addCatalogPagedMessage(introText, items, pageSize) {
+                const ps = Math.max(1, parseInt(pageSize, 10) || 5);
+                const wrap = document.createElement('div');
+                wrap.className = 'message bot-message catalog-paged-wrap';
+
+                const introDiv = document.createElement('div');
+                introDiv.className = 'catalog-intro';
+                const intro = String(introText || '');
+                const useRich =
+                    intro.includes('✅') ||
+                    intro.includes('**') ||
+                    intro.includes('](') ||
+                    /https?:\/\//i.test(intro);
+                if (useRich) {
+                    let h = intro.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+                    h = h.replace(
+                        /\[([^\]]+)]\((https?:[^)\s]+)\)/g,
+                        '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>'
+                    );
+                    h = h.replace(/\n/g, '<br>');
+                    introDiv.innerHTML = h;
+                } else {
+                    introDiv.textContent = intro;
+                }
+                wrap.appendChild(introDiv);
+
+                const listEl = document.createElement('div');
+                listEl.className = 'catalog-item-list';
+                wrap.appendChild(listEl);
+
+                const footerEl = document.createElement('div');
+                footerEl.className = 'catalog-item-footer';
+                wrap.appendChild(footerEl);
+
+                const btnRow = document.createElement('div');
+                btnRow.className = 'catalog-btn-row';
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'catalog-more-btn';
+                btn.textContent = 'Дальше';
+                btnRow.appendChild(btn);
+                wrap.appendChild(btnRow);
+
+                let page = 0;
+
+                function renderPage() {
+                    const start = page * ps;
+                    const slice = items.slice(start, start + ps);
+                    listEl.innerHTML = '';
+                    slice.forEach(function (item, idx) {
+                        const globalIdx = start + idx + 1;
+                        const row = document.createElement('div');
+                        row.className = 'catalog-item-row';
+                        const name = escapeHtmlClient(item.name || '');
+                        const price = formatPriceRu(item.price);
+                        const qty = escapeHtmlClient(item.quantity ?? '');
+                        row.innerHTML =
+                            '<span class="catalog-item-num">' +
+                            globalIdx +
+                            '.</span>' +
+                            '<div class="catalog-item-body">' +
+                            '<div class="catalog-item-name">' +
+                            name +
+                            '</div>' +
+                            '<div class="catalog-item-meta">' +
+                            '<span>Цена: ' +
+                            escapeHtmlClient(price) +
+                            ' руб.</span>' +
+                            '<span>В наличии: ' +
+                            qty +
+                            ' шт.</span>' +
+                            '</div></div>';
+                        listEl.appendChild(row);
+                    });
+                    const shownEnd = Math.min(start + slice.length, items.length);
+                    const shownStart = items.length ? start + 1 : 0;
+                    footerEl.textContent =
+                        items.length > 0
+                            ? 'Показано ' + shownStart + '–' + shownEnd + ' из ' + items.length
+                            : '';
+                    btn.style.display = shownEnd < items.length ? 'inline-block' : 'none';
+                }
+
+                btn.addEventListener('click', function () {
+                    page += 1;
+                    renderPage();
+                    messagesDiv.scrollTop = messagesDiv.scrollHeight;
+                });
+
+                renderPage();
+                messagesDiv.appendChild(wrap);
+                messagesDiv.scrollTop = messagesDiv.scrollHeight;
+            }
+
             /** Блок «думаю» с таймером и сменой подсказок — снимает ощущение «зависания». */
             function appendTypingStatus() {
                 const wrap = document.createElement('div');
@@ -582,7 +768,19 @@ import SpeedInsights from "@vercel/speed-insights/astro";
 
                     const data = await response.json();
                     typing.remove();
-                    addMessage(data.answer || 'Пустой ответ от сервера');
+                    if (
+                        data.catalogItems &&
+                        Array.isArray(data.catalogItems) &&
+                        data.catalogItems.length > 0
+                    ) {
+                        addCatalogPagedMessage(
+                            data.answer || '',
+                            data.catalogItems,
+                            data.catalogPageSize
+                        );
+                    } else {
+                        addMessage(data.answer || 'Пустой ответ от сервера');
+                    }
 
                     const t = text;
                     const short = t.length <= 52;
