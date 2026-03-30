@@ -315,11 +315,40 @@ function catalogQueryTokens(qNorm) {
         .filter((t) => t.length >= 2 && !CATALOG_QUERY_STOPWORDS.has(t));
 }
 
-/** Общий вопрос «что есть на сайте / в каталоге» — показать выборку без узкого фильтра */
+/**
+ * Корни для поиска: в номенклатуре часто «холодильная», а в запросе «холодильники» — подстрока не совпадает.
+ */
+function augmentCatalogQueryForSearch(qNorm) {
+    let s = String(qNorm || '');
+    s = s.replace(/холодильн[а-яё]*/gi, 'холод');
+    s = s.replace(/морозильн[а-яё]*/gi, 'мороз');
+    s = s.replace(/сканер[а-яё]*/gi, 'скан');
+    s = s.replace(/весов|веса\b|вес\b/gi, 'вес');
+    s = s.replace(/принтер[а-яё]*/gi, 'принтер');
+    s = s.replace(/ккм\b|касс[а-яё]*/gi, 'касс');
+    s = s.replace(/мясоруб[а-яё]*/gi, 'мясоруб');
+    return normalizeCatalogToken(s);
+}
+
+/** Узкая тематика (не «весь каталог») — не подмешивать первые N позиций алфавита */
+function looksLikeSpecificProductTopic(question) {
+    const raw = String(question || '').toLowerCase();
+    return /холод|мороз|рефриж|скан|штрих|вес|принтер|касс|ккм|тсд|терминал|фиск|витрин|мясоруб|детектор|миксер|блендер|посудомо/i.test(
+        raw
+    );
+}
+
+/** Общий вопрос «какие товары / что на сайте» без конкретной категории — выборка срезом каталога */
 function isBroadCatalogListingIntent(question) {
     const raw = String(question || '').toLowerCase();
+    if (looksLikeSpecificProductTopic(question)) {
+        return false;
+    }
     return (
-        /(?:какие|что|какой)\s+(?:товар|товары|есть)|товар(?:ы)?\s+(?:есть|на\s+сайте)|на\s+сайте|весь\s+каталог|все\s+товары|что\s+(?:у\s+вас|есть|прода)|ассортимент|номенклатур|что\s+можно\s+купить/i.test(
+        /(?:какие|что|какой)\s+(?:товар|товары)\b/i.test(raw) ||
+        /товар(?:ы)?\s+(?:есть|на\s+сайте)/i.test(raw) ||
+        /\bна\s+сайте\b/i.test(raw) ||
+        /весь\s+каталог|все\s+товары|что\s+(?:у\s+вас|есть|прода)\b|ассортимент|номенклатур|что\s+можно\s+купить/i.test(
             raw
         )
     );
@@ -355,15 +384,21 @@ function findAllCatalogMatches(rawQuery, inStockProducts) {
     q = normalizeCatalogToken(q);
     if (!q || q.length < 2) return [];
 
+    const qAug = augmentCatalogQueryForSearch(q);
+    const primary = qAug.length >= 2 ? qAug : q;
+
     const pool = inStockProducts.map((p) => ({
         p,
         n: normalizeCatalogToken(p.name || ''),
         h: p._searchHaystack || normalizeCatalogToken(p.name || ''),
     }));
 
-    let hits = pool.filter(({ n, h }) => h.includes(q) || n.includes(q));
+    let hits = pool.filter(({ n, h }) => h.includes(primary) || n.includes(primary));
+    if (hits.length === 0 && primary !== q) {
+        hits = pool.filter(({ n, h }) => h.includes(q) || n.includes(q));
+    }
     if (hits.length === 0) {
-        const tokens = catalogQueryTokens(q);
+        const tokens = catalogQueryTokens(primary);
         if (tokens.length === 0) return [];
         hits = pool.filter(({ n, h }) => tokens.every((t) => h.includes(t) || n.includes(t)));
     }
@@ -411,15 +446,21 @@ function findBestCatalogMatch(rawQuery, inStockProducts) {
     q = normalizeCatalogToken(q);
     if (!q || q.length < 2) return null;
 
+    const qAug = augmentCatalogQueryForSearch(q);
+    const primary = qAug.length >= 2 ? qAug : q;
+
     const pool = inStockProducts.map((p) => ({
         p,
         n: normalizeCatalogToken(p.name || ''),
         h: p._searchHaystack || normalizeCatalogToken(p.name || ''),
     }));
 
-    let hits = pool.filter(({ n, h }) => h.includes(q) || n.includes(q));
+    let hits = pool.filter(({ n, h }) => h.includes(primary) || n.includes(primary));
+    if (hits.length === 0 && primary !== q) {
+        hits = pool.filter(({ n, h }) => h.includes(q) || n.includes(q));
+    }
     if (hits.length === 0) {
-        const tokens = catalogQueryTokens(q);
+        const tokens = catalogQueryTokens(primary);
         if (tokens.length === 0) return null;
         hits = pool.filter(({ n, h }) => tokens.every((t) => h.includes(t) || n.includes(t)));
     }
