@@ -175,8 +175,9 @@ function scoreDisplayProduct(product: Product): number {
 
 function shouldHideDisplayProduct(product: Product): boolean {
 	const name = sanitizeProductName(product.name).toLowerCase();
+	const price = parsePriceValue(product.price);
 	return (
-		parsePriceValue(product.price) <= 0 ||
+		price < 50 ||
 		/(автомой|автохим|шампун|запчаст|комплектующ)/i.test(name) ||
 		/(ремонт|поверк|техническое обслуживание|техобслуж|монтаж|демонтаж|аренда|услуг|услуга|работы|возмещение расходов)/i.test(
 			name

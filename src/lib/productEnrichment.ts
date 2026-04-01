@@ -57,7 +57,10 @@ function tokenizeProductName(value: unknown): string[] {
 
 function cleanupModelKey(value: string): string {
 	return normalizeText(value)
-		.replace(/\b(ккт|ккм|онлайн|касса|кассовый|аппарат|фискальный|регистратор|без|с|фн|фн15|фн36)\b/g, ' ')
+		.replace(
+			/\b(ккт|ккм|онлайн|касса|кассовый|аппарат|фискальный|регистратор|смарт|терминал|сканер|штрихкода|шк|проводной|беспроводной|ручной|без|с|под|подставкой|фн|фн15|фн36)\b/g,
+			' '
+		)
 		.replace(/\s+/g, ' ')
 		.trim();
 }
@@ -79,6 +82,10 @@ export function buildProductMeaningKeys(product: ProductLike): string[] {
 	for (let i = 0; i < tokens.length - 1; i += 1) {
 		const pair = `${tokens[i]} ${tokens[i + 1]}`;
 		if (/\d/.test(pair)) keys.add(cleanupModelKey(pair));
+	}
+	for (let i = 0; i < tokens.length - 2; i += 1) {
+		const triple = `${tokens[i]} ${tokens[i + 1]} ${tokens[i + 2]}`;
+		if (/\d/.test(triple)) keys.add(cleanupModelKey(triple));
 	}
 
 	const sku = normalizeText(product.sku);
@@ -139,7 +146,7 @@ export function applyProductEnrichment<T extends ProductLike & { description?: s
 	return {
 		...product,
 		image: match.image,
-		enrichedDescription: String(product.description || '').trim() || match.description,
+		enrichedDescription: String(match.description || '').trim() || String(product.description || '').trim(),
 		specs: match.specs || [],
 		enrichmentSourceUrl: match.sourceUrl,
 		enrichmentSourceTitle: match.sourceTitle,
