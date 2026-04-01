@@ -107,7 +107,8 @@ export async function POST({ request }) {
             };
         });
 
-        const payload = { groups, products };
+        const dedupedProducts = dedupeCatalogProducts(products);
+        const payload = { groups, products: dedupedProducts };
 
         const catalogPath = path.join('/tmp', 'catalog.json');
         fs.writeFileSync(catalogPath, JSON.stringify(payload, null, 2));
@@ -127,7 +128,7 @@ export async function POST({ request }) {
         return new Response(
             JSON.stringify({
                 success: true,
-                productsCount: products.length,
+                productsCount: dedupedProducts.length,
                 groupsCount: groups.length,
             }),
             {
@@ -165,6 +166,38 @@ function extractProductGroupId(product) {
         product.Группы?.[0]?.Группа?.[0]?.Ид?.[0] ||
         null
     );
+}
+
+function parsePriceValue(raw) {
+    const n =
+        typeof raw === 'number'
+            ? raw
+            : parseFloat(String(raw ?? '').replace(/\s/g, '').replace(',', '.'));
+    return Number.isFinite(n) ? n : 0;
+}
+
+function scoreCatalogProduct(product) {
+    return (
+        (Number(product.quantity) > 0 ? 1000 : 0) +
+        (parsePriceValue(product.price) > 0 ? 100 : 0) +
+        (product.description ? 10 : 0) +
+        (product.sku ? 5 : 0)
+    );
+}
+
+function dedupeCatalogProducts(products) {
+    const byKey = new Map();
+    for (const product of products) {
+        const key =
+            product.id ||
+            `${String(product.sku || '').trim()}::${String(product.name || '').trim().toLowerCase()}`;
+        if (!key) continue;
+        const prev = byKey.get(key);
+        if (!prev || scoreCatalogProduct(product) > scoreCatalogProduct(prev)) {
+            byKey.set(key, product);
+        }
+    }
+    return [...byKey.values()];
 }
 
 function flattenCommerceGroups(nodes, parentId, groupMap) {

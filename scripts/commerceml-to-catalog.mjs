@@ -51,6 +51,38 @@ function extractProductGroupId(product) {
     );
 }
 
+function parsePriceValue(raw) {
+    const n =
+        typeof raw === 'number'
+            ? raw
+            : parseFloat(String(raw ?? '').replace(/\s/g, '').replace(',', '.'));
+    return Number.isFinite(n) ? n : 0;
+}
+
+function scoreCatalogProduct(product) {
+    return (
+        (Number(product.quantity) > 0 ? 1000 : 0) +
+        (parsePriceValue(product.price) > 0 ? 100 : 0) +
+        (product.description ? 10 : 0) +
+        (product.sku ? 5 : 0)
+    );
+}
+
+function dedupeCatalogProducts(products) {
+    const byKey = new Map();
+    for (const product of products) {
+        const key =
+            product.id ||
+            `${String(product.sku || '').trim()}::${String(product.name || '').trim().toLowerCase()}`;
+        if (!key) continue;
+        const prev = byKey.get(key);
+        if (!prev || scoreCatalogProduct(product) > scoreCatalogProduct(prev)) {
+            byKey.set(key, product);
+        }
+    }
+    return [...byKey.values()];
+}
+
 function flattenCommerceGroups(nodes, parentId, groupMap) {
     for (const node of asArray(nodes)) {
         const id = node.Ид?.[0];
@@ -138,7 +170,11 @@ async function main() {
         };
     });
 
-    const payload = { groups, products, generatedAt: new Date().toISOString() };
+    const payload = {
+        groups,
+        products: dedupeCatalogProducts(products),
+        generatedAt: new Date().toISOString(),
+    };
 
     fs.mkdirSync(path.dirname(outFile), { recursive: true });
     fs.writeFileSync(outFile, JSON.stringify(payload, null, 2), 'utf8');
