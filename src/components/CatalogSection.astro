@@ -21,6 +21,7 @@ interface GroupNode {
 }
 
 const { node, level = 0 } = Astro.props as { node: GroupNode; level?: number };
+const previewLimit = level <= 1 ? 4 : 3;
 
 const posPlural = new Intl.PluralRules('ru');
 function pluralPos(n: number): string {
@@ -28,6 +29,13 @@ function pluralPos(n: number): string {
 	if (r === 'one') return 'позиция';
 	if (r === 'few') return 'позиции';
 	return 'позиций';
+}
+
+function pluralGoods(n: number): string {
+	const r = posPlural.select(n);
+	if (r === 'one') return 'товар';
+	if (r === 'few') return 'товара';
+	return 'товаров';
 }
 
 let folderMeta = '';
@@ -59,6 +67,30 @@ const folderSearch = normalizeSearchText(
 		...node.products.slice(0, 24).flatMap((product) => [product.name, product.sku, product.description]),
 	].join(' ')
 );
+
+function getSectionPromo(id: string) {
+	const promos = {
+		'public-retail': {
+			title: 'Для кассовой зоны и автоматизации магазина',
+			text: 'ККТ, весы, сканеры, денежные ящики и расходники для торговой точки и кассового узла.',
+		},
+		'public-food': {
+			title: 'Для кухни, производства и торгового зала',
+			text: 'Пищевое, холодильное и торговое оборудование для магазинов, кафе, столовых и производства.',
+		},
+		'public-video': {
+			title: 'Для контроля и безопасности объекта',
+			text: 'Камеры, регистраторы и сопутствующее оборудование для магазина, склада и точки выдачи.',
+		},
+		'public-software': {
+			title: 'Для кассового ПО и лицензирования',
+			text: 'Программные решения, лицензии и сервисные цифровые продукты для торговли и учёта.',
+		},
+	};
+	return promos[id as keyof typeof promos] || null;
+}
+
+const sectionPromo = level === 0 ? getSectionPromo(node.id) : null;
 ---
 
 <section
@@ -73,6 +105,14 @@ const folderSearch = normalizeSearchText(
 			<p class="catalog-folder-kicker">{level === 0 ? 'Основной раздел' : 'Подраздел'}</p>
 			<h2 class="folder-title">{node.name}</h2>
 			{folderMeta && <p class="catalog-folder-meta">{folderMeta}</p>}
+			{
+				sectionPromo && (
+					<div class="catalog-folder-promo">
+						<strong>{sectionPromo.title}</strong>
+						<span>{sectionPromo.text}</span>
+					</div>
+				)
+			}
 		</div>
 	</header>
 
@@ -102,41 +142,58 @@ const folderSearch = normalizeSearchText(
 
 	{
 		node.products.length > 0 && (
-			<ul class="product-list product-grid">
-				{node.products.map((p) => (
-					<li
-						class="product-card"
-						data-product-search={normalizeSearchText(
-							[p.name, p.sku, p.description, node.name].join(' ')
-						)}
-					>
-						<div class="product-card-top">
-							<div class="product-card-media" aria-hidden="true">📦</div>
-							<div class="product-card-main">
-								<div class="product-name">{p.name}</div>
-								{p.sku && <div class="product-sku">Артикул: {p.sku}</div>}
+			<>
+				<ul class="product-list product-grid" data-product-list data-expanded="false">
+					{node.products.map((p, index) => (
+						<li
+							class={`product-card ${index >= previewLimit ? 'product-card--extra' : ''}`}
+							data-product-search={normalizeSearchText(
+								[p.name, p.sku, p.description, node.name].join(' ')
+							)}
+						>
+							<div class="product-card-top">
+								<div class="product-card-media" aria-hidden="true">📦</div>
+								<div class="product-card-main">
+									<div class="product-name">{p.name}</div>
+									{p.sku && <div class="product-sku">Артикул: {p.sku}</div>}
+								</div>
 							</div>
-						</div>
-						{p.description && <p class="product-desc">{p.description}</p>}
-						<div class="product-meta">
-							<span class="price">
-								{typeof p.price === 'number'
-									? `${p.price.toLocaleString('ru-RU')} ₽`
-									: p.price}
-							</span>
-							<span
-								class={`availability-badge availability-badge--${stockAvailabilityBand(p.quantity)}`}
+							{p.description && <p class="product-desc">{p.description}</p>}
+							<div class="product-meta">
+								<span class="price">
+									{typeof p.price === 'number'
+										? `${p.price.toLocaleString('ru-RU')} ₽`
+										: p.price}
+								</span>
+								<span
+									class={`availability-badge availability-badge--${stockAvailabilityBand(p.quantity)}`}
+								>
+									{stockAvailabilityLabel(p.quantity)}
+								</span>
+							</div>
+							<div class="product-card-footer">
+								<span class="product-foot-note">{node.name}</span>
+								<a class="product-link" href="/">Уточнить у консультанта</a>
+							</div>
+						</li>
+					))}
+				</ul>
+				{
+					node.products.length > previewLimit && (
+						<div class="product-list-actions">
+							<button
+								type="button"
+								class="product-more-btn"
+								data-products-toggle
+								data-expand-label={`Показать еще ${node.products.length - previewLimit} ${pluralGoods(node.products.length - previewLimit)}`}
+								data-collapse-label="Свернуть список"
 							>
-								{stockAvailabilityLabel(p.quantity)}
-							</span>
+								Показать еще {node.products.length - previewLimit} {pluralGoods(node.products.length - previewLimit)}
+							</button>
 						</div>
-						<div class="product-card-footer">
-							<span class="product-foot-note">{node.name}</span>
-							<a class="product-link" href="/">Уточнить у консультанта</a>
-						</div>
-					</li>
-				))}
-			</ul>
+					)
+				}
+			</>
 		)
 	}
 

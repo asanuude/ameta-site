@@ -112,6 +112,7 @@ function shouldHideDisplayProduct(product: Product): boolean {
 	const name = sanitizeProductName(product.name).toLowerCase();
 	return (
 		parsePriceValue(product.price) <= 0 ||
+		/(автомой|автохим|шампун|запчаст|комплектующ)/i.test(name) ||
 		/(ремонт|поверк|техническое обслуживание|техобслуж|монтаж|демонтаж|аренда|услуг|услуга|работы|возмещение расходов)/i.test(
 			name
 		)
@@ -193,6 +194,7 @@ function shouldHidePublicNode(name: string): boolean {
 		/^(?:я+|!+)?(?:внутрен|яяя|яяя|перенесено|товар на ремонте|it отдел|материалы для собственных нужд|образцы|проекты|новое)/i.test(
 			name.trim()
 		) ||
+		/(автомой|автохим|шампун|запчаст|комплектующ)/i.test(name) ||
 		/(услуг|работы|ремонт|поверк|аренда|внутреннее потребление|журналы|справки|заявления)/i.test(
 			name
 		)
@@ -269,6 +271,14 @@ function makePublicSection(id: string, name: string, sourceNames: string[], allN
 	};
 }
 
+function getSectionCardCopy(id: string): string {
+	if (id === 'public-retail') return 'Кассы, весы, сканеры, денежные ящики и всё для торговой точки.';
+	if (id === 'public-food') return 'Тепловое, холодильное и производственное оборудование для кухни и зала.';
+	if (id === 'public-video') return 'Камеры и системы наблюдения для магазина, склада и объекта.';
+	if (id === 'public-software') return 'Лицензии, сервисы и программные продукты для торговли и учёта.';
+	return 'Подборка товаров из реальной 1С-выгрузки.';
+}
+
 function buildTree(parentId: string | null | undefined): GroupNode[] {
 	return groups
 		.filter((g) => (g.parentId ?? null) === (parentId ?? null))
@@ -308,14 +318,7 @@ const publicSections = [
 		['ВИДЕО', 'яВИДЕО'],
 		flatNodes
 	),
-	makePublicSection(
-		'public-scales',
-		'Весовое оборудование и запчасти',
-		['Весы Максима ЗИП'],
-		flatNodes
-	),
 	makePublicSection('public-software', 'ПО, лицензии и ОФД', ['!ГЦТО'], flatNodes),
-	makePublicSection('public-carwash', 'Оборудование для автомойки', ['Автомойка'], flatNodes),
 ].filter((node): node is GroupNode => Boolean(node));
 const seenProductMeanings = new Set<string>();
 const storefrontSections = publicSections
@@ -345,6 +348,20 @@ const catalogStats = [
 	{ value: totalProducts.toLocaleString('ru-RU'), label: 'товаров на витрине' },
 	{ value: totalGroups.toLocaleString('ru-RU'), label: 'публичных разделов и подпапок' },
 	{ value: inStockProducts.toLocaleString('ru-RU'), label: 'позиций с остатком' },
+];
+const storefrontHighlights = [
+	{
+		title: 'Сначала раздел, потом товар',
+		text: 'Как у сильных каталогов: сверху крупные направления, а не длинная сырая простыня из базы.',
+	},
+	{
+		title: 'Короткие превью внутри разделов',
+		text: 'Показываем главное сразу, а полный список раскрывается по кнопке только там, где это нужно.',
+	},
+	{
+		title: 'Только публичный ассортимент',
+		text: 'Автомойка, шампуни, запчасти и служебные ветки исключены из клиентской витрины.',
+	},
 ];
 ---
 
@@ -706,6 +723,12 @@ const catalogStats = [
 				color: var(--muted);
 			}
 
+			.root-card-copy {
+				font-size: 14px;
+				line-height: 1.55;
+				color: var(--text);
+			}
+
 			.root-card-tags {
 				display: flex;
 				flex-wrap: wrap;
@@ -725,6 +748,35 @@ const catalogStats = [
 
 			.panel {
 				padding: 24px;
+			}
+
+			.insight-strip {
+				display: grid;
+				grid-template-columns: repeat(3, minmax(0, 1fr));
+				gap: 14px;
+				margin-bottom: 18px;
+			}
+
+			.insight-card {
+				padding: 18px;
+				border-radius: 20px;
+				border: 1px solid var(--line);
+				background: linear-gradient(180deg, #fff 0%, #f8fbff 100%);
+			}
+
+			.insight-card strong {
+				display: block;
+				margin-bottom: 8px;
+				font-size: 15px;
+				line-height: 1.3;
+				color: var(--text);
+			}
+
+			.insight-card span {
+				display: block;
+				font-size: 14px;
+				line-height: 1.6;
+				color: var(--muted);
 			}
 
 			.catalog-empty {
@@ -829,6 +881,28 @@ const catalogStats = [
 				color: var(--muted);
 			}
 
+			.catalog-folder-promo {
+				display: grid;
+				gap: 6px;
+				margin-top: 14px;
+				padding: 14px 16px;
+				border-radius: 18px;
+				background: #eef4ff;
+				border: 1px solid #d9e6ff;
+			}
+
+			.catalog-folder-promo strong {
+				font-size: 14px;
+				line-height: 1.35;
+				color: var(--text);
+			}
+
+			.catalog-folder-promo span {
+				font-size: 14px;
+				line-height: 1.55;
+				color: #4d6282;
+			}
+
 			.subfolder-nav {
 				margin-bottom: 16px;
 			}
@@ -913,6 +987,33 @@ const catalogStats = [
 				border-radius: 22px;
 				background: linear-gradient(180deg, #fff 0%, #f8fbff 100%);
 				box-shadow: 0 10px 24px rgba(16, 35, 63, 0.06);
+			}
+
+			.product-list[data-expanded='false'] .product-card--extra {
+				display: none;
+			}
+
+			.product-list-actions {
+				margin-top: 12px;
+				display: flex;
+				justify-content: flex-start;
+			}
+
+			.product-more-btn {
+				min-height: 42px;
+				padding: 0 16px;
+				border-radius: 999px;
+				border: 1px solid #cddbf3;
+				background: #fff;
+				color: var(--brand);
+				font-size: 13px;
+				font-weight: 800;
+				cursor: pointer;
+			}
+
+			.product-more-btn:hover {
+				background: #f5f9ff;
+				border-color: #a8c0ef;
 			}
 
 			.product-card-top {
@@ -1096,6 +1197,7 @@ const catalogStats = [
 				}
 
 				.hero-side-grid,
+				.insight-strip,
 				.product-grid,
 				.subfolder-grid,
 				.root-grid {
@@ -1180,6 +1282,17 @@ const catalogStats = [
 					</div>
 				) : (
 					<>
+						<section class="insight-strip" aria-label="Принципы каталога">
+							{
+								storefrontHighlights.map((item) => (
+									<div class="insight-card">
+										<strong>{item.title}</strong>
+										<span>{item.text}</span>
+									</div>
+								))
+							}
+						</section>
+
 						{showTree && (
 							<section class="quick-nav">
 								<div class="quick-nav-head">
@@ -1202,6 +1315,7 @@ const catalogStats = [
 										>
 											<span class="root-card-icon" aria-hidden="true">🏷️</span>
 											<div class="root-card-title">{node.name}</div>
+											<div class="root-card-copy">{getSectionCardCopy(node.id)}</div>
 											<div class="root-card-meta">
 												{node.branchProductCount.toLocaleString('ru-RU')} позиций в разделе
 											</div>
@@ -1222,7 +1336,8 @@ const catalogStats = [
 								</div>
 								<p class="section-text">
 									Страница оформлена по логике ведущих сайтов: сначала обзор категорий, затем
-									понятные коммерческие секции с подпапками и карточками товаров в сетке.
+									понятные коммерческие секции, а внутри разделов сначала короткое превью товаров,
+									чтобы каталог не превращался в бесконечный список.
 								</p>
 							</div>
 
@@ -1282,11 +1397,11 @@ const catalogStats = [
 		<script>
 			document.addEventListener('DOMContentLoaded', function () {
 				const input = document.querySelector('[data-catalog-search]');
-				if (!input) return;
-
 				const products = Array.from(document.querySelectorAll('[data-product-search]'));
 				const folders = Array.from(document.querySelectorAll('[data-folder-id], .catalog-folder[data-folder-search]'));
 				const rootCards = Array.from(document.querySelectorAll('[data-root-card-for]'));
+				const productLists = Array.from(document.querySelectorAll('[data-product-list]'));
+				const productToggles = Array.from(document.querySelectorAll('[data-products-toggle]'));
 				const empty = document.querySelector('[data-catalog-empty]');
 
 				function normalize(text) {
@@ -1298,8 +1413,36 @@ const catalogStats = [
 						.trim();
 				}
 
+				function setListExpanded(list, expanded) {
+					list.setAttribute('data-expanded', expanded ? 'true' : 'false');
+					const section = list.closest('.catalog-folder');
+					if (!section) return;
+					const button = section.querySelector('[data-products-toggle]');
+					if (!button) return;
+					button.textContent = expanded ? button.getAttribute('data-collapse-label') : button.getAttribute('data-expand-label');
+				}
+
+				productLists.forEach(function (list) {
+					setListExpanded(list, false);
+				});
+
+				productToggles.forEach(function (button) {
+					button.addEventListener('click', function () {
+						const section = button.closest('.catalog-folder');
+						const list = section && section.querySelector('[data-product-list]');
+						if (!list) return;
+						const expanded = list.getAttribute('data-expanded') === 'true';
+						setListExpanded(list, !expanded);
+					});
+				});
+
 				function applySearch() {
+					if (!input) return;
 					const query = normalize(input.value);
+
+					productLists.forEach(function (list) {
+						setListExpanded(list, query.length > 0);
+					});
 
 					products.forEach(function (card) {
 						if (!query) {
@@ -1337,7 +1480,9 @@ const catalogStats = [
 					}
 				}
 
-				input.addEventListener('input', applySearch);
+				if (input) {
+					input.addEventListener('input', applySearch);
+				}
 			});
 		</script>
 
