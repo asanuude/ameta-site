@@ -1,0 +1,574 @@
+---
+import SpeedInsights from '@vercel/speed-insights/astro';
+import CatalogSection from '../../components/CatalogSection.astro';
+import { getCatalogStorefront } from '../../lib/catalogStorefront';
+
+const slug = String(Astro.params.section || '');
+const { sections } = getCatalogStorefront();
+const currentSection = sections.find((section) => section.meta.slug === slug) || null;
+
+if (!currentSection) {
+	Astro.response.status = 404;
+}
+---
+
+<!doctype html>
+<html lang="ru">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>{currentSection ? `${currentSection.meta.name} — AMETA` : 'Раздел не найден — AMETA'}</title>
+		<style>
+			:root {
+				color-scheme: light;
+				--bg: #eff4fb;
+				--panel: #ffffff;
+				--panel-soft: #f8fbff;
+				--text: #10233f;
+				--muted: #55657d;
+				--brand: #174ea6;
+				--brand-soft: #eef4ff;
+				--line: #dae3ef;
+				--line-strong: #c1d1e6;
+				--shadow: 0 18px 44px rgba(16, 35, 63, 0.12);
+			}
+
+			* {
+				box-sizing: border-box;
+				margin: 0;
+				padding: 0;
+			}
+
+			body {
+				font-family:
+					Inter,
+					system-ui,
+					-apple-system,
+					sans-serif;
+				background:
+					radial-gradient(circle at top, rgba(23, 78, 166, 0.08), transparent 30%),
+					linear-gradient(180deg, #f3f7fc 0%, var(--bg) 100%);
+				color: var(--text);
+				padding: 20px 16px 48px;
+			}
+
+			.wrap {
+				max-width: 1260px;
+				margin: 0 auto;
+			}
+
+			.hero,
+			.toolbar,
+			.panel,
+			.quick-links,
+			.not-found {
+				background: rgba(255, 255, 255, 0.94);
+				border: 1px solid rgba(218, 227, 239, 0.9);
+				border-radius: 28px;
+				box-shadow: var(--shadow);
+				backdrop-filter: blur(10px);
+			}
+
+			.hero {
+				display: grid;
+				grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.85fr);
+				gap: 18px;
+				padding: 28px;
+				margin-bottom: 18px;
+				background:
+					linear-gradient(135deg, rgba(23, 78, 166, 0.1), rgba(23, 78, 166, 0) 55%),
+					linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+			}
+
+			.breadcrumbs {
+				display: inline-flex;
+				align-items: center;
+				flex-wrap: wrap;
+				gap: 8px;
+				padding: 8px 12px;
+				margin-bottom: 18px;
+				border-radius: 999px;
+				background: var(--brand-soft);
+				color: var(--brand);
+				font-size: 13px;
+				font-weight: 700;
+			}
+
+			.hero-title {
+				font-size: clamp(34px, 5vw, 54px);
+				line-height: 0.98;
+				letter-spacing: -0.04em;
+				font-weight: 900;
+				max-width: 14ch;
+				margin-bottom: 16px;
+			}
+
+			.hero-text,
+			.hero-support {
+				max-width: 68ch;
+				font-size: 17px;
+				line-height: 1.7;
+				color: var(--muted);
+			}
+
+			.hero-text {
+				margin-bottom: 12px;
+			}
+
+			.hero-tags {
+				display: flex;
+				flex-wrap: wrap;
+				gap: 8px;
+				margin: 18px 0 22px;
+			}
+
+			.hero-tags span {
+				display: inline-flex;
+				align-items: center;
+				padding: 7px 11px;
+				border-radius: 999px;
+				background: #eef4ff;
+				color: var(--brand);
+				font-size: 12px;
+				font-weight: 800;
+			}
+
+			.hero-actions {
+				display: flex;
+				flex-wrap: wrap;
+				gap: 12px;
+			}
+
+			.hero-btn {
+				display: inline-flex;
+				align-items: center;
+				justify-content: center;
+				min-height: 46px;
+				padding: 0 18px;
+				border-radius: 999px;
+				font-size: 14px;
+				font-weight: 800;
+				text-decoration: none;
+			}
+
+			.hero-btn--light {
+				background: var(--brand);
+				color: #fff;
+				box-shadow: 0 14px 28px rgba(23, 78, 166, 0.22);
+			}
+
+			.hero-btn--ghost {
+				background: #fff;
+				color: var(--brand);
+				border: 1px solid var(--line-strong);
+			}
+
+			.hero-visual {
+				display: grid;
+				gap: 14px;
+				align-content: start;
+			}
+
+			.hero-image {
+				overflow: hidden;
+				border-radius: 24px;
+				border: 1px solid #d9e6ff;
+				background: #eef4ff;
+				aspect-ratio: 16 / 11;
+			}
+
+			.hero-image img {
+				width: 100%;
+				height: 100%;
+				object-fit: cover;
+				display: block;
+			}
+
+			.hero-note {
+				padding: 16px 18px;
+				border-radius: 18px;
+				background: var(--panel-soft);
+				border: 1px solid var(--line);
+				color: var(--muted);
+				font-size: 14px;
+				line-height: 1.6;
+			}
+
+			.hero-note strong {
+				display: block;
+				margin-bottom: 6px;
+				font-size: 15px;
+				color: var(--text);
+			}
+
+			.toolbar {
+				display: grid;
+				grid-template-columns: minmax(0, 1fr) auto;
+				gap: 14px;
+				align-items: center;
+				padding: 16px 18px;
+				margin-bottom: 18px;
+			}
+
+			.search-wrap {
+				position: relative;
+			}
+
+			.search-input {
+				width: 100%;
+				min-height: 52px;
+				padding: 0 18px 0 48px;
+				border-radius: 18px;
+				border: 1px solid var(--line);
+				background: #f8fbff;
+				font-size: 15px;
+				color: var(--text);
+				outline: none;
+			}
+
+			.search-icon {
+				position: absolute;
+				left: 16px;
+				top: 50%;
+				transform: translateY(-50%);
+				font-size: 18px;
+				color: #6b7c95;
+				pointer-events: none;
+			}
+
+			.toolbar-text {
+				display: flex;
+				align-items: center;
+				gap: 6px;
+				font-size: 14px;
+				color: var(--muted);
+			}
+
+			.quick-links,
+			.panel,
+			.not-found {
+				padding: 22px;
+				margin-bottom: 18px;
+			}
+
+			.quick-links-head {
+				display: flex;
+				flex-wrap: wrap;
+				align-items: end;
+				justify-content: space-between;
+				gap: 12px;
+				margin-bottom: 16px;
+			}
+
+			.section-kicker {
+				font-size: 12px;
+				font-weight: 900;
+				letter-spacing: 0.08em;
+				text-transform: uppercase;
+				color: var(--brand);
+				margin-bottom: 6px;
+			}
+
+			.section-title {
+				font-size: clamp(24px, 3vw, 32px);
+				line-height: 1.1;
+				letter-spacing: -0.03em;
+				font-weight: 900;
+				color: var(--text);
+			}
+
+			.section-text {
+				font-size: 15px;
+				line-height: 1.6;
+				color: var(--muted);
+				max-width: 74ch;
+			}
+
+			.section-grid {
+				display: grid;
+				grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+				gap: 14px;
+			}
+
+			.section-card {
+				display: flex;
+				flex-direction: column;
+				gap: 8px;
+				padding: 16px;
+				border-radius: 18px;
+				border: 1px solid var(--line);
+				background: linear-gradient(180deg, #fff 0%, #f8fbff 100%);
+				text-decoration: none;
+				color: inherit;
+			}
+
+			.section-card:hover {
+				border-color: #8bb0f4;
+				box-shadow: 0 10px 24px rgba(23, 78, 166, 0.08);
+			}
+
+			.section-card-title {
+				font-size: 16px;
+				font-weight: 800;
+				color: var(--text);
+			}
+
+			.section-card-count {
+				font-size: 13px;
+				color: var(--muted);
+			}
+
+			.not-found {
+				font-size: 16px;
+				line-height: 1.7;
+				color: var(--muted);
+			}
+
+			.catalog-results-empty {
+				display: none;
+				margin-top: 16px;
+				padding: 22px;
+				border-radius: 18px;
+				border: 1px dashed var(--line-strong);
+				background: #f8fbff;
+				color: var(--muted);
+				text-align: center;
+				font-size: 15px;
+				line-height: 1.6;
+			}
+
+			.catalog-results-empty.is-visible {
+				display: block;
+			}
+
+			.is-hidden {
+				display: none !important;
+			}
+
+			@media (max-width: 1024px) {
+				.hero {
+					grid-template-columns: 1fr;
+				}
+
+				.toolbar {
+					grid-template-columns: 1fr;
+				}
+			}
+
+			@media (max-width: 720px) {
+				body {
+					padding: 14px 12px 32px;
+				}
+
+				.hero,
+				.toolbar,
+				.quick-links,
+				.panel,
+				.not-found {
+					border-radius: 20px;
+					padding: 18px;
+				}
+
+				.section-grid {
+					grid-template-columns: 1fr;
+				}
+			}
+		</style>
+	</head>
+	<body>
+		<div class="wrap">
+			{
+				currentSection ? (
+					<>
+						<section class="hero">
+							<div>
+								<div class="breadcrumbs">
+									<a href="/" style="color: inherit; text-decoration: none;">AMETA</a>
+									<span>/</span>
+									<a href="/catalog" style="color: inherit; text-decoration: none;">Каталог</a>
+									<span>/</span>
+									<span>{currentSection.meta.name}</span>
+								</div>
+								<h1 class="hero-title">{currentSection.meta.name}</h1>
+								<p class="hero-text">{currentSection.meta.heroSummary}</p>
+								<p class="hero-support">{currentSection.meta.heroSupport}</p>
+								<div class="hero-tags">
+									{currentSection.meta.tags.map((tag) => <span>{tag}</span>)}
+								</div>
+								<div class="hero-actions">
+									<a class="hero-btn hero-btn--light" href="#section-content">Смотреть содержимое раздела</a>
+									<a class="hero-btn hero-btn--ghost" href="/">Обсудить поставку и внедрение</a>
+								</div>
+							</div>
+
+							<div class="hero-visual">
+								<div class="hero-image">
+									<img src={currentSection.meta.image} alt={currentSection.meta.name} loading="eager" />
+								</div>
+								<div class="hero-note">
+									<strong>Изображение раздела</strong>
+									Этот уровень уже привязан к своей картинке. Следом можно так же привязать изображения
+									к крупным подкатегориям внутри раздела.
+								</div>
+							</div>
+						</section>
+
+						<div class="toolbar">
+							<div class="search-wrap">
+								<input
+									class="search-input"
+									type="search"
+									placeholder="Поиск по товару, артикулу, описанию или подразделу"
+									data-catalog-search
+								/>
+								<span class="search-icon" aria-hidden="true">⌕</span>
+							</div>
+							<div class="toolbar-text">
+								<strong>Поиск:</strong>
+								фильтр внутри выбранного раздела.
+							</div>
+						</div>
+
+						{currentSection.node.children.length > 0 && (
+							<section class="quick-links">
+								<div class="quick-links-head">
+									<div>
+										<p class="section-kicker">Подразделы</p>
+										<h2 class="section-title">Быстрый переход по внутренним веткам</h2>
+									</div>
+									<p class="section-text">
+										Здесь собраны основные ветки выбранного направления. Дальше внутри страницы уже
+										идет детальная выкладка товаров и подпапок.
+									</p>
+								</div>
+								<div class="section-grid">
+									{currentSection.node.children.map((child) => (
+										<a class="section-card" href={`#cat-folder-${child.id}`}>
+											<div class="section-card-title">{child.name}</div>
+											<div class="section-card-count">
+												{child.branchProductCount.toLocaleString('ru-RU')} позиций
+											</div>
+										</a>
+									))}
+								</div>
+							</section>
+						)}
+
+						<section class="panel" id="section-content">
+							<div class="quick-links-head">
+								<div>
+									<p class="section-kicker">Содержимое раздела</p>
+									<h2 class="section-title">Подразделы и товары</h2>
+								</div>
+								<p class="section-text">
+									На этой странице уже раскрыта полная структура выбранного направления. Сначала
+									показываются основные позиции, остальное раскрывается внутри нужной ветки.
+								</p>
+							</div>
+
+							<CatalogSection node={currentSection.node} level={0} showHeader={false} />
+
+							<div class="catalog-results-empty" data-catalog-empty>
+								По этому запросу внутри раздела ничего не найдено.
+							</div>
+						</section>
+					</>
+				) : (
+					<section class="not-found">
+						<h1 class="section-title" style="margin-bottom: 12px;">Раздел не найден</h1>
+						<p style="margin-bottom: 16px;">
+							Такой страницы раздела сейчас нет. Вернитесь в общий каталог и выберите доступное направление.
+						</p>
+						<a class="hero-btn hero-btn--light" href="/catalog">Вернуться в каталог</a>
+					</section>
+				)
+			}
+		</div>
+
+		<script>
+			document.addEventListener('DOMContentLoaded', function () {
+				const input = document.querySelector('[data-catalog-search]');
+				if (!input) return;
+
+				const products = Array.from(document.querySelectorAll('[data-product-search]'));
+				const folders = Array.from(document.querySelectorAll('[data-folder-id], .catalog-folder[data-folder-search]'));
+				const productLists = Array.from(document.querySelectorAll('[data-product-list]'));
+				const productToggles = Array.from(document.querySelectorAll('[data-products-toggle]'));
+				const empty = document.querySelector('[data-catalog-empty]');
+
+				function normalize(text) {
+					return String(text || '')
+						.toLowerCase()
+						.replace(/ё/g, 'е')
+						.replace(/[^a-zа-я0-9]+/gi, ' ')
+						.replace(/\s+/g, ' ')
+						.trim();
+				}
+
+				function setListExpanded(list, expanded) {
+					list.setAttribute('data-expanded', expanded ? 'true' : 'false');
+					const section = list.closest('.catalog-folder');
+					if (!section) return;
+					const button = section.querySelector('[data-products-toggle]');
+					if (!button) return;
+					button.textContent = expanded ? button.getAttribute('data-collapse-label') : button.getAttribute('data-expand-label');
+				}
+
+				productLists.forEach(function (list) {
+					setListExpanded(list, false);
+				});
+
+				productToggles.forEach(function (button) {
+					button.addEventListener('click', function () {
+						const section = button.closest('.catalog-folder');
+						const list = section && section.querySelector('[data-product-list]');
+						if (!list) return;
+						const expanded = list.getAttribute('data-expanded') === 'true';
+						setListExpanded(list, !expanded);
+					});
+				});
+
+				function applySearch() {
+					const query = normalize(input.value);
+
+					productLists.forEach(function (list) {
+						setListExpanded(list, query.length > 0);
+					});
+
+					products.forEach(function (card) {
+						if (!query) {
+							card.classList.remove('is-hidden');
+							return;
+						}
+						const haystack = normalize(card.getAttribute('data-product-search'));
+						card.classList.toggle('is-hidden', !haystack.includes(query));
+					});
+
+					const reversedFolders = folders.slice().reverse();
+					reversedFolders.forEach(function (folder) {
+						if (!query) {
+							folder.classList.remove('is-hidden');
+							return;
+						}
+
+						const ownMatch = normalize(folder.getAttribute('data-folder-search')).includes(query);
+						const visibleProducts = folder.querySelector('[data-product-search]:not(.is-hidden)');
+						const visibleChildren = folder.querySelector('.folder-nested .catalog-folder:not(.is-hidden)');
+						folder.classList.toggle('is-hidden', !(ownMatch || visibleProducts || visibleChildren));
+					});
+
+					if (empty) {
+						const hasVisible = products.some(function (card) {
+							return !card.classList.contains('is-hidden');
+						});
+						empty.classList.toggle('is-visible', !hasVisible && query.length > 0);
+					}
+				}
+
+				input.addEventListener('input', applySearch);
+			});
+		</script>
+
+		<SpeedInsights />
+	</body>
+</html>

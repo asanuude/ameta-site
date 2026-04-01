@@ -20,7 +20,11 @@ interface GroupNode {
 	branchProductCount: number;
 }
 
-const { node, level = 0 } = Astro.props as { node: GroupNode; level?: number };
+const { node, level = 0, showHeader = true } = Astro.props as {
+	node: GroupNode;
+	level?: number;
+	showHeader?: boolean;
+};
 const previewLimit = level <= 1 ? 4 : 3;
 
 const posPlural = new Intl.PluralRules('ru');
@@ -71,20 +75,20 @@ const folderSearch = normalizeSearchText(
 function getSectionPromo(id: string) {
 	const promos = {
 		'public-retail': {
-			title: 'Для кассовой зоны и автоматизации магазина',
-			text: 'ККТ, весы, сканеры, денежные ящики и расходники для торговой точки и кассового узла.',
+			title: 'Для кассовых мест и торгового зала',
+			text: 'Оборудование и периферия для торговой точки, кассового узла и автоматизации процессов.',
 		},
 		'public-food': {
-			title: 'Для кухни, производства и торгового зала',
-			text: 'Пищевое, холодильное и торговое оборудование для магазинов, кафе, столовых и производства.',
+			title: 'Для кухни, производства и торгового объекта',
+			text: 'Рабочие позиции для оснащения кухни, торгового зала, производства и складских зон.',
 		},
 		'public-video': {
 			title: 'Для контроля и безопасности объекта',
-			text: 'Камеры, регистраторы и сопутствующее оборудование для магазина, склада и точки выдачи.',
+			text: 'Техника для наблюдения, записи и контроля ситуации в магазине, на складе и на объекте.',
 		},
 		'public-software': {
-			title: 'Для кассового ПО и лицензирования',
-			text: 'Программные решения, лицензии и сервисные цифровые продукты для торговли и учёта.',
+			title: 'Для запуска и сопровождения программных решений',
+			text: 'Лицензии, программные продукты и цифровые сервисы для торговли, учета и рабочих мест.',
 		},
 	};
 	return promos[id as keyof typeof promos] || null;
@@ -99,22 +103,26 @@ const sectionPromo = level === 0 ? getSectionPromo(node.id) : null;
 	data-folder-id={node.id}
 	data-folder-search={folderSearch}
 >
-	<header class="catalog-folder-head">
-		<span class="catalog-folder-icon" aria-hidden="true">{level === 0 ? '🏷️' : '📁'}</span>
-		<div class="catalog-folder-titles">
-			<p class="catalog-folder-kicker">{level === 0 ? 'Основной раздел' : 'Подраздел'}</p>
-			<h2 class="folder-title">{node.name}</h2>
-			{folderMeta && <p class="catalog-folder-meta">{folderMeta}</p>}
-			{
-				sectionPromo && (
-					<div class="catalog-folder-promo">
-						<strong>{sectionPromo.title}</strong>
-						<span>{sectionPromo.text}</span>
-					</div>
-				)
-			}
-		</div>
-	</header>
+	{
+		showHeader && (
+			<header class="catalog-folder-head">
+				<span class="catalog-folder-icon" aria-hidden="true">{level === 0 ? '🏷️' : '📁'}</span>
+				<div class="catalog-folder-titles">
+					<p class="catalog-folder-kicker">{level === 0 ? 'Основной раздел' : 'Подраздел'}</p>
+					<h2 class="folder-title">{node.name}</h2>
+					{folderMeta && <p class="catalog-folder-meta">{folderMeta}</p>}
+					{
+						sectionPromo && (
+							<div class="catalog-folder-promo">
+								<strong>{sectionPromo.title}</strong>
+								<span>{sectionPromo.text}</span>
+							</div>
+						)
+					}
+				</div>
+			</header>
+		)
+	}
 
 	{
 		node.children.length > 0 && (
@@ -205,3 +213,355 @@ const sectionPromo = level === 0 ? getSectionPromo(node.id) : null;
 		))
 	}
 </section>
+
+<style is:global>
+	.folder-block {
+		margin-bottom: 0;
+	}
+
+	.folder-nested {
+		margin-top: 18px;
+		padding-left: 18px;
+		border-left: 2px solid #d8e2f0;
+	}
+
+	.catalog-folder {
+		scroll-margin-top: 96px;
+		margin-bottom: 24px;
+	}
+
+	.catalog-folder--root {
+		margin-bottom: 34px;
+		padding-bottom: 4px;
+		border-bottom: 1px solid #edf2f8;
+	}
+
+	.catalog-folder-head {
+		display: flex;
+		align-items: flex-start;
+		gap: 14px;
+		padding: 20px;
+		margin-bottom: 16px;
+		border-radius: 22px;
+		background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+		border: 1px solid #dae3ef;
+	}
+
+	.catalog-folder-icon {
+		width: 50px;
+		height: 50px;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		border-radius: 18px;
+		background: rgba(23, 78, 166, 0.08);
+		font-size: 24px;
+		line-height: 1;
+		flex-shrink: 0;
+	}
+
+	.catalog-folder-titles {
+		flex: 1;
+		min-width: 0;
+	}
+
+	.catalog-folder-kicker {
+		font-size: 12px;
+		font-weight: 800;
+		text-transform: uppercase;
+		letter-spacing: 0.08em;
+		color: #174ea6;
+		margin-bottom: 6px;
+	}
+
+	.folder-title {
+		font-size: clamp(22px, 3vw, 30px);
+		line-height: 1.15;
+		letter-spacing: -0.03em;
+		font-weight: 900;
+		color: #10233f;
+		margin-bottom: 8px;
+	}
+
+	.catalog-folder-meta {
+		font-size: 14px;
+		line-height: 1.55;
+		color: #55657d;
+	}
+
+	.catalog-folder-promo {
+		display: grid;
+		gap: 6px;
+		margin-top: 14px;
+		padding: 14px 16px;
+		border-radius: 18px;
+		background: #eef4ff;
+		border: 1px solid #d9e6ff;
+	}
+
+	.catalog-folder-promo strong {
+		font-size: 14px;
+		line-height: 1.35;
+		color: #10233f;
+	}
+
+	.catalog-folder-promo span {
+		font-size: 14px;
+		line-height: 1.55;
+		color: #4d6282;
+	}
+
+	.subfolder-nav {
+		margin-bottom: 16px;
+	}
+
+	.subfolder-nav-title {
+		font-size: 12px;
+		font-weight: 900;
+		text-transform: uppercase;
+		letter-spacing: 0.08em;
+		color: #5e6f8f;
+		margin-bottom: 10px;
+	}
+
+	.subfolder-grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+		gap: 12px;
+	}
+
+	.subfolder-card {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-start;
+		gap: 6px;
+		padding: 16px;
+		background: #f8fbff;
+		border: 1px solid #dae3ef;
+		border-radius: 18px;
+		text-decoration: none;
+		color: inherit;
+		transition:
+			border-color 0.12s ease,
+			box-shadow 0.12s ease,
+			transform 0.12s ease;
+	}
+
+	.subfolder-card:hover {
+		border-color: #8bb0f4;
+		box-shadow: 0 10px 24px rgba(23, 78, 166, 0.1);
+		transform: translateY(-1px);
+	}
+
+	.subfolder-card-icon {
+		font-size: 18px;
+	}
+
+	.subfolder-card-name {
+		font-size: 16px;
+		font-weight: 800;
+		line-height: 1.3;
+		color: #10233f;
+	}
+
+	.subfolder-card-count {
+		font-size: 13px;
+		color: #55657d;
+	}
+
+	.subfolder-card-hint {
+		font-size: 12px;
+		font-weight: 800;
+		color: #174ea6;
+	}
+
+	.product-list {
+		list-style: none;
+	}
+
+	.product-grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+		gap: 14px;
+	}
+
+	.product-card {
+		display: flex;
+		flex-direction: column;
+		gap: 14px;
+		min-height: 220px;
+		padding: 18px;
+		border: 1px solid #dae3ef;
+		border-radius: 22px;
+		background: linear-gradient(180deg, #fff 0%, #f8fbff 100%);
+		box-shadow: 0 10px 24px rgba(16, 35, 63, 0.06);
+	}
+
+	.product-list[data-expanded='false'] .product-card--extra {
+		display: none;
+	}
+
+	.product-list-actions {
+		margin-top: 12px;
+		display: flex;
+		justify-content: flex-start;
+	}
+
+	.product-more-btn {
+		min-height: 42px;
+		padding: 0 16px;
+		border-radius: 999px;
+		border: 1px solid #cddbf3;
+		background: #fff;
+		color: #174ea6;
+		font-size: 13px;
+		font-weight: 800;
+		cursor: pointer;
+	}
+
+	.product-more-btn:hover {
+		background: #f5f9ff;
+		border-color: #a8c0ef;
+	}
+
+	.product-card-top {
+		display: flex;
+		align-items: flex-start;
+		gap: 12px;
+	}
+
+	.product-card-media {
+		width: 48px;
+		height: 48px;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		border-radius: 16px;
+		background: rgba(23, 78, 166, 0.08);
+		font-size: 22px;
+		flex-shrink: 0;
+	}
+
+	.product-card-main {
+		min-width: 0;
+	}
+
+	.product-name {
+		font-size: 17px;
+		line-height: 1.35;
+		font-weight: 800;
+		color: #10233f;
+		margin-bottom: 6px;
+	}
+
+	.product-sku {
+		font-size: 12px;
+		font-weight: 700;
+		letter-spacing: 0.04em;
+		text-transform: uppercase;
+		color: #6f7f98;
+	}
+
+	.product-desc {
+		font-size: 14px;
+		line-height: 1.55;
+		color: #55657d;
+		display: -webkit-box;
+		-webkit-line-clamp: 3;
+		line-clamp: 3;
+		-webkit-box-orient: vertical;
+		overflow: hidden;
+	}
+
+	.product-meta {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 10px 14px;
+		margin-top: auto;
+	}
+
+	.price {
+		font-size: 22px;
+		line-height: 1;
+		font-weight: 900;
+		letter-spacing: -0.03em;
+		color: #10233f;
+	}
+
+	.availability-badge {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		min-height: 32px;
+		padding: 0 12px;
+		border-radius: 999px;
+		font-size: 12px;
+		font-weight: 900;
+		letter-spacing: 0.04em;
+		text-transform: uppercase;
+	}
+
+	.availability-badge--order {
+		background: #fee2e2;
+		color: #9d174d;
+	}
+
+	.availability-badge--low {
+		background: #ffedd5;
+		color: #9a3412;
+	}
+
+	.availability-badge--medium {
+		background: #dbeafe;
+		color: #1d4ed8;
+	}
+
+	.availability-badge--plenty {
+		background: #d1fae5;
+		color: #047857;
+	}
+
+	.product-card-footer {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		padding-top: 12px;
+		border-top: 1px solid #edf2f8;
+	}
+
+	.product-foot-note {
+		font-size: 12px;
+		line-height: 1.45;
+		color: #55657d;
+	}
+
+	.product-link {
+		font-size: 13px;
+		font-weight: 800;
+		color: #174ea6;
+		text-decoration: none;
+		white-space: nowrap;
+	}
+
+	.product-link:hover {
+		text-decoration: underline;
+	}
+
+	.is-hidden {
+		display: none !important;
+	}
+
+	@media (max-width: 720px) {
+		.subfolder-grid,
+		.product-grid {
+			grid-template-columns: 1fr;
+		}
+
+		.product-card-footer {
+			flex-direction: column;
+			align-items: flex-start;
+		}
+	}
+</style>

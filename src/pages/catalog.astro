@@ -1,354 +1,9 @@
 ---
-import fs from 'node:fs';
-import path from 'node:path';
-import CatalogSection from '../components/CatalogSection.astro';
 import SpeedInsights from '@vercel/speed-insights/astro';
-import { stockAvailabilityBand, stockAvailabilityLabel } from '../lib/stockAvailability';
+import { getCatalogStorefront } from '../lib/catalogStorefront';
 
-interface Group {
-	id: string;
-	name: string;
-	parentId?: string | null;
-}
-
-interface Product {
-	id?: string;
-	name?: string;
-	description?: string;
-	sku?: string;
-	price?: number | string;
-	quantity?: number;
-	groupId?: string | null;
-}
-
-interface GroupNode {
-	id: string;
-	name: string;
-	products: Product[];
-	children: GroupNode[];
-	branchProductCount: number;
-}
-
-const catalogPath = path.join(process.cwd(), 'public', 'catalog.json');
-let groups: Group[] = [];
-let products: Product[] = [];
-
-try {
-	const raw = JSON.parse(fs.readFileSync(catalogPath, 'utf-8')) as
-		| { groups?: Group[]; products?: Product[] }
-		| Product[];
-	if (Array.isArray(raw)) {
-		products = raw;
-	} else {
-		groups = raw.groups ?? [];
-		products = raw.products ?? [];
-	}
-} catch {
-	/* нет файла — пустой каталог */
-}
-
-function compareNames(a: string, b: string): number {
-	return a.localeCompare(b, 'ru', { sensitivity: 'base' });
-}
-
-function compareProducts(a: Product, b: Product): number {
-	return compareNames(String(a.name || ''), String(b.name || ''));
-}
-
-function compareGroups(a: GroupNode, b: GroupNode): number {
-	if (b.branchProductCount !== a.branchProductCount) {
-		return b.branchProductCount - a.branchProductCount;
-	}
-	return compareNames(a.name, b.name);
-}
-
-function parsePriceValue(raw: unknown): number {
-	const n =
-		typeof raw === 'number'
-			? raw
-			: parseFloat(String(raw ?? '').replace(/\s/g, '').replace(',', '.'));
-	return Number.isFinite(n) ? n : 0;
-}
-
-function flattenNodes(nodes: GroupNode[]): GroupNode[] {
-	return nodes.flatMap((node) => [node, ...flattenNodes(node.children)]);
-}
-
-function sanitizeProductName(name: unknown): string {
-	return String(name || '')
-		.replace(/\s+/g, ' ')
-		.replace(/\s+([,.;:!?])/g, '$1')
-		.replace(/!{2,}/g, '!')
-		.replace(/\(\s+/g, '(')
-		.replace(/\s+\)/g, ')')
-		.replace(/"\s+/g, '"')
-		.replace(/\s+"/g, ' "')
-		.trim();
-}
-
-function sanitizeProductDescription(desc: unknown): string {
-	return String(desc || '').replace(/\s+/g, ' ').trim();
-}
-
-function normalizeProductMeaning(name: unknown): string {
-	return sanitizeProductName(name)
-		.toLowerCase()
-		.replace(/ё/g, 'е')
-		.replace(/[^a-zа-я0-9]+/gi, ' ')
-		.replace(/\s+/g, ' ')
-		.trim();
-}
-
-function scoreDisplayProduct(product: Product): number {
-	return (
-		(Number(product.quantity) > 0 ? 1000 : 0) +
-		(parsePriceValue(product.price) > 0 ? 100 : 0) +
-		(sanitizeProductDescription(product.description) ? 10 : 0) +
-		(String(product.sku || '').trim() ? 5 : 0)
-	);
-}
-
-function shouldHideDisplayProduct(product: Product): boolean {
-	const name = sanitizeProductName(product.name).toLowerCase();
-	return (
-		parsePriceValue(product.price) <= 0 ||
-		/(автомой|автохим|шампун|запчаст|комплектующ)/i.test(name) ||
-		/(ремонт|поверк|техническое обслуживание|техобслуж|монтаж|демонтаж|аренда|услуг|услуга|работы|возмещение расходов)/i.test(
-			name
-		)
-	);
-}
-
-function prepareDisplayProduct(product: Product): Product {
-	return {
-		...product,
-		name: sanitizeProductName(product.name),
-		description: sanitizeProductDescription(product.description),
-	};
-}
-
-function dedupeProductsForDisplay(products: Product[], seenKeys: Set<string>): Product[] {
-	const bestByMeaning = new Map<string, Product>();
-
-	for (const rawProduct of products) {
-		const product = prepareDisplayProduct(rawProduct);
-		if (shouldHideDisplayProduct(product)) continue;
-		const key =
-			normalizeProductMeaning(product.name) ||
-			`${String(product.sku || '').trim()}::${String(product.id || '').trim()}`;
-		if (!key) continue;
-		const prev = bestByMeaning.get(key);
-		if (!prev || scoreDisplayProduct(product) > scoreDisplayProduct(prev)) {
-			bestByMeaning.set(key, product);
-		}
-	}
-
-	const unique = [...bestByMeaning.entries()]
-		.filter(([key]) => {
-			if (seenKeys.has(key)) return false;
-			seenKeys.add(key);
-			return true;
-		})
-		.map(([, product]) => product)
-		.sort(compareProducts);
-
-	return unique;
-}
-
-function sanitizeDisplayName(name: string): string {
-	const manual = new Map([
-		['!Торговый зал', 'Торговый зал'],
-		['!ТТО', 'Торговое и пищевое оборудование'],
-		['!ГЦТО', 'ПО, лицензии и сервис'],
-		['яТОРГОВЫЙ СКЛАД', 'Торговый склад'],
-		['яСКЛАД ТТО', 'Склад торгового и пищевого оборудования'],
-		['яВИДЕО', 'Видеонаблюдение'],
-		['яЗапчасти', 'Запчасти'],
-		['яОборуд.пищевого производства', 'Оборудование пищевого производства'],
-		['яОборудование для убойного цеха', 'Оборудование для убойного цеха'],
-		['яТорговое оборудование', 'Торговое оборудование'],
-		['яХолодильное оборудование', 'Холодильное оборудование'],
-		['яХолодильные комплектующие', 'Холодильные комплектующие'],
-		['яЗапчасти к мясорубкам', 'Запчасти к мясорубкам'],
-		['яВанны моечные', 'Ванны моечные'],
-		['яСтолы производственные', 'Столы производственные'],
-		['яСтеллажи Водолей', 'Стеллажи Водолей'],
-		['яСтеллажи STAHLER', 'Стеллажи STAHLER'],
-		['яСтеллажи серии "Купец"', 'Стеллажи серии "Купец"'],
-		['яСтеллаж Штрих', 'Стеллажи Штрих'],
-		['яСтелаж архивный', 'Стеллаж архивный'],
-		['яПрилавки торговые', 'Прилавки торговые'],
-	]);
-	if (manual.has(name)) return manual.get(name) || name;
-
-	return name
-		.replace(/^!+/, '')
-		.replace(/^я+/i, '')
-		.replace(/\s{2,}/g, ' ')
-		.trim();
-}
-
-function shouldHidePublicNode(name: string): boolean {
-	return (
-		/^_+$/.test(name.trim()) ||
-		/^(?:я+|!+)?(?:внутрен|яяя|яяя|перенесено|товар на ремонте|it отдел|материалы для собственных нужд|образцы|проекты|новое)/i.test(
-			name.trim()
-		) ||
-		/(автомой|автохим|шампун|запчаст|комплектующ)/i.test(name) ||
-		/(услуг|работы|ремонт|поверк|аренда|внутреннее потребление|журналы|справки|заявления)/i.test(
-			name
-		)
-	);
-}
-
-function clonePublicNode(node: GroupNode): GroupNode | null {
-	const visibleChildren = node.children
-		.map((child) => clonePublicNode(child))
-		.filter((child): child is GroupNode => Boolean(child));
-	const visibleOwnProducts = node.products.map((product) => prepareDisplayProduct(product));
-	const hidden = shouldHidePublicNode(node.name);
-
-	if (hidden && visibleChildren.length === 0 && visibleOwnProducts.length === 0) {
-		return null;
-	}
-
-	if (hidden && visibleChildren.length > 0 && visibleOwnProducts.length === 0) {
-		return {
-			id: `${node.id}-flattened`,
-			name: sanitizeDisplayName(node.name),
-			products: [],
-			children: visibleChildren,
-			branchProductCount: visibleChildren.reduce((sum, child) => sum + child.branchProductCount, 0),
-		};
-	}
-
-	return {
-		...node,
-		name: sanitizeDisplayName(node.name),
-		products: visibleOwnProducts,
-		children: visibleChildren,
-		branchProductCount:
-			visibleOwnProducts.length +
-			visibleChildren.reduce((sum, child) => sum + child.branchProductCount, 0),
-	};
-}
-
-function dedupePublicNodeForDisplay(node: GroupNode, seenKeys: Set<string>): GroupNode | null {
-	const children = node.children
-		.map((child) => dedupePublicNodeForDisplay(child, seenKeys))
-		.filter((child): child is GroupNode => Boolean(child));
-	const products = dedupeProductsForDisplay(node.products, seenKeys);
-	const branchProductCount = products.length + children.reduce((sum, child) => sum + child.branchProductCount, 0);
-
-	if (branchProductCount === 0 && children.length === 0) {
-		return null;
-	}
-
-	return {
-		...node,
-		products,
-		children,
-		branchProductCount,
-	};
-}
-
-function makePublicSection(id: string, name: string, sourceNames: string[], allNodes: GroupNode[]): GroupNode | null {
-	const childNodes = sourceNames
-		.flatMap((sourceName) => allNodes.filter((node) => node.name === sourceName))
-		.map((node) => clonePublicNode(node))
-		.filter((node): node is GroupNode => Boolean(node))
-		.filter((node, index, arr) => arr.findIndex((other) => other.id === node.id) === index)
-		.sort(compareGroups);
-
-	if (childNodes.length === 0) return null;
-
-	return {
-		id,
-		name,
-		products: [],
-		children: childNodes,
-		branchProductCount: childNodes.reduce((sum, child) => sum + child.branchProductCount, 0),
-	};
-}
-
-function getSectionCardCopy(id: string): string {
-	if (id === 'public-retail') return 'Кассовые узлы, весы, сканеры и техника для торговой точки.';
-	if (id === 'public-food') return 'Оборудование для кухни, производства, торгового зала и склада.';
-	if (id === 'public-video') return 'Системы наблюдения и контроля для объекта, склада и магазина.';
-	if (id === 'public-software') return 'Программное обеспечение, лицензии и сервисы для торговли и учета.';
-	return 'Оборудование и ПО из рабочей 1С-выгрузки.';
-}
-
-function buildTree(parentId: string | null | undefined): GroupNode[] {
-	return groups
-		.filter((g) => (g.parentId ?? null) === (parentId ?? null))
-		.map((g) => {
-			const children = buildTree(g.id).sort(compareGroups);
-			const ownProducts = products.filter((p) => p.groupId === g.id).sort(compareProducts);
-			const inChildren = children.reduce((sum, ch) => sum + ch.branchProductCount, 0);
-			return {
-				id: g.id,
-				name: g.name,
-				products: ownProducts,
-				children,
-				branchProductCount: ownProducts.length + inChildren,
-			};
-		})
-		.sort(compareGroups);
-}
-
-const groupIds = new Set(groups.map((g) => g.id));
-const orphans = products
-	.filter((p) => !p.groupId || !groupIds.has(p.groupId))
-	.sort(compareProducts);
-
-const tree = buildTree(null);
-const flatNodes = flattenNodes(tree);
-const publicSections = [
-	makePublicSection('public-retail', 'Автоматизация торговли', ['!Торговый зал', 'яТОРГОВЫЙ СКЛАД'], flatNodes),
-	makePublicSection(
-		'public-food',
-		'Пищевое и торговое оборудование',
-		['!ТТО', 'яСКЛАД ТТО'],
-		flatNodes
-	),
-	makePublicSection(
-		'public-video',
-		'Видеонаблюдение и безопасность',
-		['ВИДЕО', 'яВИДЕО'],
-		flatNodes
-	),
-	makePublicSection('public-software', 'ПО, лицензии и ОФД', ['!ГЦТО'], flatNodes),
-].filter((node): node is GroupNode => Boolean(node));
-const seenProductMeanings = new Set<string>();
-const storefrontSections = publicSections
-	.map((node) => dedupePublicNodeForDisplay(node, seenProductMeanings))
-	.filter((node): node is GroupNode => Boolean(node));
-const showTree = storefrontSections.length > 0;
-const rootCategories = storefrontSections.slice(0, 12);
-const publicProductIds = new Set<string>();
-const publicNodeIds = new Set<string>();
-function collectPublicStats(nodes: GroupNode[]) {
-	for (const node of nodes) {
-		publicNodeIds.add(node.id);
-		for (const product of node.products) {
-			const pid = String(product.id || '');
-			if (pid) publicProductIds.add(pid);
-		}
-		collectPublicStats(node.children);
-	}
-}
-collectPublicStats(storefrontSections);
-const totalProducts = publicProductIds.size || products.length;
-const totalGroups = publicNodeIds.size || groups.length;
-const inStockProducts = products.filter(
-	(p) => publicProductIds.has(String(p.id || '')) && stockAvailabilityBand(p.quantity) !== 'order'
-).length;
-const catalogStats = [
-	{ value: totalProducts.toLocaleString('ru-RU'), label: 'товаров на витрине' },
-	{ value: totalGroups.toLocaleString('ru-RU'), label: 'публичных разделов и подпапок' },
-	{ value: inStockProducts.toLocaleString('ru-RU'), label: 'позиций с остатком' },
-];
+const { products, sections, stats } = getCatalogStorefront();
+const hasSections = sections.length > 0;
 ---
 
 <!doctype html>
@@ -364,12 +19,12 @@ const catalogStats = [
 				--panel: #ffffff;
 				--panel-soft: #f8fbff;
 				--text: #10233f;
-				--muted: #62738d;
-				--line: #dbe4f0;
-				--line-strong: #c3d1e6;
+				--muted: #55657d;
 				--brand: #174ea6;
-				--brand-2: #3d73df;
-				--shadow: 0 18px 48px rgba(16, 35, 63, 0.12);
+				--brand-soft: #eef4ff;
+				--line: #dae3ef;
+				--line-strong: #c1d1e6;
+				--shadow: 0 18px 44px rgba(16, 35, 63, 0.12);
 			}
 
 			* {
@@ -378,33 +33,27 @@ const catalogStats = [
 				padding: 0;
 			}
 
-			html {
-				scroll-behavior: smooth;
-			}
-
 			body {
 				font-family:
-					-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+					Inter,
+					system-ui,
+					-apple-system,
+					sans-serif;
 				background:
-					radial-gradient(circle at top left, rgba(61, 115, 223, 0.12), transparent 28%),
-					linear-gradient(180deg, #f6f9fd 0%, var(--bg) 100%);
-				min-height: 100vh;
+					radial-gradient(circle at top, rgba(23, 78, 166, 0.08), transparent 30%),
+					linear-gradient(180deg, #f3f7fc 0%, var(--bg) 100%);
 				color: var(--text);
-				padding: 24px 16px 48px;
-			}
-
-			a {
-				color: inherit;
+				padding: 20px 16px 48px;
 			}
 
 			.wrap {
-				max-width: 1320px;
+				max-width: 1260px;
 				margin: 0 auto;
 			}
 
 			.hero {
 				display: grid;
-				grid-template-columns: minmax(0, 1.55fr) minmax(300px, 0.95fr);
+				grid-template-columns: minmax(0, 1.35fr) minmax(300px, 0.9fr);
 				gap: 18px;
 				margin-bottom: 20px;
 			}
@@ -413,47 +62,48 @@ const catalogStats = [
 			.hero-side,
 			.toolbar,
 			.quick-nav,
-			.panel {
-				background: var(--panel);
-				border: 1px solid rgba(195, 209, 230, 0.9);
-				border-radius: 24px;
+			.image-policy {
+				background: rgba(255, 255, 255, 0.94);
+				border: 1px solid rgba(218, 227, 239, 0.9);
+				border-radius: 28px;
 				box-shadow: var(--shadow);
+				backdrop-filter: blur(10px);
 			}
 
 			.hero-card {
 				padding: 28px;
 				background:
-					linear-gradient(135deg, rgba(23, 78, 166, 0.98) 0%, rgba(61, 115, 223, 0.94) 100%);
-				color: #fff;
-				border: none;
+					linear-gradient(135deg, rgba(23, 78, 166, 0.1), rgba(23, 78, 166, 0) 55%),
+					linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
 			}
 
 			.breadcrumbs {
-				display: flex;
-				flex-wrap: wrap;
+				display: inline-flex;
+				align-items: center;
 				gap: 8px;
+				padding: 8px 12px;
+				margin-bottom: 18px;
+				border-radius: 999px;
+				background: var(--brand-soft);
+				color: var(--brand);
 				font-size: 13px;
 				font-weight: 700;
-				letter-spacing: 0.05em;
-				text-transform: uppercase;
-				opacity: 0.8;
-				margin-bottom: 14px;
 			}
 
 			.hero-title {
 				font-size: clamp(34px, 5vw, 54px);
-				line-height: 1.02;
+				line-height: 0.98;
 				letter-spacing: -0.04em;
 				font-weight: 900;
-				max-width: 10ch;
-				margin-bottom: 14px;
+				max-width: 14ch;
+				margin-bottom: 16px;
 			}
 
 			.hero-text {
-				max-width: 56ch;
-				font-size: 16px;
-				line-height: 1.65;
-				color: rgba(255, 255, 255, 0.92);
+				max-width: 68ch;
+				font-size: 17px;
+				line-height: 1.7;
+				color: var(--muted);
 				margin-bottom: 22px;
 			}
 
@@ -467,107 +117,110 @@ const catalogStats = [
 				display: inline-flex;
 				align-items: center;
 				justify-content: center;
-				min-height: 48px;
+				min-height: 46px;
 				padding: 0 18px;
 				border-radius: 999px;
-				text-decoration: none;
-				font-weight: 800;
 				font-size: 14px;
+				font-weight: 800;
+				text-decoration: none;
 				transition:
 					transform 0.12s ease,
-					filter 0.12s ease,
-					background-color 0.12s ease;
+					box-shadow 0.12s ease,
+					background 0.12s ease;
 			}
 
 			.hero-btn:hover {
 				transform: translateY(-1px);
-				filter: brightness(1.03);
 			}
 
 			.hero-btn--light {
-				background: #fff;
-				color: var(--brand);
+				background: var(--brand);
+				color: #fff;
+				box-shadow: 0 14px 28px rgba(23, 78, 166, 0.22);
 			}
 
 			.hero-btn--ghost {
-				background: rgba(255, 255, 255, 0.12);
-				color: #fff;
-				border: 1px solid rgba(255, 255, 255, 0.18);
+				background: #fff;
+				color: var(--brand);
+				border: 1px solid var(--line-strong);
 			}
 
 			.hero-side {
 				padding: 24px;
-				display: flex;
-				flex-direction: column;
-				gap: 14px;
+				display: grid;
+				gap: 20px;
+				align-content: start;
 			}
 
-			.hero-side-title {
-				font-size: 13px;
+			.hero-side-title,
+			.section-kicker {
+				font-size: 12px;
 				font-weight: 900;
 				text-transform: uppercase;
 				letter-spacing: 0.08em;
 				color: var(--brand);
 			}
 
+			.hero-side-title {
+				margin-bottom: 12px;
+			}
+
 			.hero-side-grid {
 				display: grid;
-				grid-template-columns: repeat(2, minmax(0, 1fr));
+				grid-template-columns: repeat(3, minmax(0, 1fr));
 				gap: 12px;
 			}
 
 			.stat-card {
-				background: var(--panel-soft);
+				padding: 18px 16px;
+				border-radius: 20px;
+				background: linear-gradient(180deg, #fff 0%, #f5f9ff 100%);
 				border: 1px solid var(--line);
-				border-radius: 18px;
-				padding: 16px;
 			}
 
 			.stat-value {
-				font-size: clamp(24px, 4vw, 34px);
+				font-size: clamp(24px, 3vw, 32px);
 				line-height: 1;
 				font-weight: 900;
 				letter-spacing: -0.04em;
 				color: var(--text);
-				margin-bottom: 8px;
+				margin-bottom: 6px;
 			}
 
 			.stat-label {
-				font-size: 13px;
+				font-size: 12px;
 				line-height: 1.45;
 				color: var(--muted);
 			}
 
 			.hero-notes {
 				display: grid;
-				gap: 10px;
+				gap: 12px;
 			}
 
 			.hero-note {
-				background: linear-gradient(180deg, #fff 0%, #f8fbff 100%);
+				padding: 16px 18px;
+				border-radius: 18px;
+				background: var(--panel-soft);
 				border: 1px solid var(--line);
-				border-radius: 16px;
-				padding: 14px 15px;
-				font-size: 14px;
-				line-height: 1.5;
 				color: var(--muted);
+				font-size: 14px;
+				line-height: 1.6;
 			}
 
 			.hero-note strong {
 				display: block;
 				color: var(--text);
-				font-size: 14px;
-				margin-bottom: 3px;
+				font-size: 15px;
+				margin-bottom: 6px;
 			}
 
 			.toolbar {
-				position: sticky;
-				top: 14px;
-				z-index: 10;
-				padding: 16px 18px;
 				display: grid;
-				grid-template-columns: minmax(280px, 1.2fr) auto;
+				grid-template-columns: minmax(0, 1fr) auto;
 				gap: 14px;
+				align-items: center;
+				padding: 16px 18px;
 				margin-bottom: 18px;
 			}
 
@@ -578,11 +231,10 @@ const catalogStats = [
 			.search-input {
 				width: 100%;
 				min-height: 52px;
-				border-radius: 16px;
-				border: 1px solid var(--line-strong);
-				background: #f7faff;
-				padding: 0 54px 0 16px;
-				font: inherit;
+				padding: 0 18px 0 48px;
+				border-radius: 18px;
+				border: 1px solid var(--line);
+				background: #f8fbff;
 				font-size: 15px;
 				color: var(--text);
 				outline: none;
@@ -590,35 +242,29 @@ const catalogStats = [
 
 			.search-input:focus {
 				border-color: #8bb0f4;
-				box-shadow: 0 0 0 4px rgba(61, 115, 223, 0.12);
+				box-shadow: 0 0 0 4px rgba(23, 78, 166, 0.12);
 			}
 
 			.search-icon {
 				position: absolute;
-				right: 16px;
+				left: 16px;
 				top: 50%;
 				transform: translateY(-50%);
 				font-size: 18px;
-				color: var(--brand);
+				color: #6b7c95;
 				pointer-events: none;
 			}
 
 			.toolbar-text {
 				display: flex;
 				align-items: center;
-				justify-content: flex-end;
-				gap: 10px;
-				text-align: right;
+				gap: 6px;
 				font-size: 14px;
-				line-height: 1.5;
 				color: var(--muted);
 			}
 
-			.toolbar-text strong {
-				color: var(--text);
-			}
-
-			.quick-nav {
+			.quick-nav,
+			.image-policy {
 				padding: 22px;
 				margin-bottom: 18px;
 			}
@@ -630,15 +276,6 @@ const catalogStats = [
 				justify-content: space-between;
 				gap: 12px;
 				margin-bottom: 16px;
-			}
-
-			.section-kicker {
-				font-size: 12px;
-				font-weight: 900;
-				letter-spacing: 0.08em;
-				text-transform: uppercase;
-				color: var(--brand);
-				margin-bottom: 6px;
 			}
 
 			.section-title {
@@ -653,22 +290,22 @@ const catalogStats = [
 				font-size: 15px;
 				line-height: 1.6;
 				color: var(--muted);
-				max-width: 72ch;
+				max-width: 74ch;
 			}
 
 			.root-grid {
 				display: grid;
-				grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-				gap: 14px;
+				grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+				gap: 16px;
 			}
 
 			.root-card {
 				display: flex;
 				flex-direction: column;
-				gap: 10px;
-				min-height: 168px;
+				gap: 14px;
+				min-height: 100%;
 				padding: 18px;
-				border-radius: 20px;
+				border-radius: 24px;
 				border: 1px solid var(--line);
 				background: linear-gradient(180deg, #fff 0%, #f8fbff 100%);
 				text-decoration: none;
@@ -681,26 +318,35 @@ const catalogStats = [
 			.root-card:hover {
 				transform: translateY(-2px);
 				border-color: #8bb0f4;
-				box-shadow: 0 10px 26px rgba(23, 78, 166, 0.12);
+				box-shadow: 0 12px 28px rgba(23, 78, 166, 0.12);
 			}
 
-			.root-card-icon {
-				width: 42px;
-				height: 42px;
-				display: inline-flex;
-				align-items: center;
-				justify-content: center;
-				border-radius: 14px;
-				background: rgba(23, 78, 166, 0.08);
-				color: var(--brand);
-				font-size: 20px;
+			.root-card-media {
+				overflow: hidden;
+				border-radius: 18px;
+				border: 1px solid #d9e6ff;
+				background: #eef4ff;
+				aspect-ratio: 16 / 10;
+			}
+
+			.root-card-media img {
+				width: 100%;
+				height: 100%;
+				object-fit: cover;
+				display: block;
 			}
 
 			.root-card-title {
-				font-size: 18px;
-				font-weight: 800;
-				line-height: 1.25;
+				font-size: 20px;
+				font-weight: 900;
+				line-height: 1.2;
 				color: var(--text);
+			}
+
+			.root-card-copy {
+				font-size: 14px;
+				line-height: 1.6;
+				color: var(--muted);
 			}
 
 			.root-card-meta {
@@ -709,16 +355,11 @@ const catalogStats = [
 				color: var(--muted);
 			}
 
-			.root-card-copy {
-				font-size: 14px;
-				line-height: 1.55;
-				color: var(--text);
-			}
-
 			.root-card-tags {
 				display: flex;
 				flex-wrap: wrap;
 				gap: 8px;
+				margin-top: auto;
 			}
 
 			.root-card-tags span {
@@ -732,11 +373,42 @@ const catalogStats = [
 				font-weight: 700;
 			}
 
-			.panel {
-				padding: 24px;
+			.root-card-link {
+				font-size: 13px;
+				font-weight: 800;
+				color: var(--brand);
 			}
 
-			.catalog-empty {
+			.image-policy-grid {
+				display: grid;
+				grid-template-columns: repeat(3, minmax(0, 1fr));
+				gap: 14px;
+				margin-top: 16px;
+			}
+
+			.image-card {
+				padding: 18px;
+				border-radius: 20px;
+				background: linear-gradient(180deg, #fff 0%, #f8fbff 100%);
+				border: 1px solid var(--line);
+			}
+
+			.image-card strong {
+				display: block;
+				margin-bottom: 8px;
+				font-size: 15px;
+				color: var(--text);
+			}
+
+			.image-card span {
+				display: block;
+				font-size: 14px;
+				line-height: 1.6;
+				color: var(--muted);
+			}
+
+			.catalog-empty,
+			.catalog-results-empty {
 				padding: 36px;
 				border-radius: 20px;
 				background: #f8fbff;
@@ -749,365 +421,11 @@ const catalogStats = [
 
 			.catalog-results-empty {
 				display: none;
-				margin-top: 18px;
-				padding: 22px;
-				border-radius: 18px;
-				border: 1px dashed var(--line-strong);
-				background: #f8fbff;
-				color: var(--muted);
-				text-align: center;
-				font-size: 15px;
-				line-height: 1.6;
+				margin-top: 16px;
 			}
 
 			.catalog-results-empty.is-visible {
 				display: block;
-			}
-
-			.folder-block {
-				margin-bottom: 0;
-			}
-
-			.folder-nested {
-				margin-top: 18px;
-				padding-left: 18px;
-				border-left: 2px solid #d8e2f0;
-			}
-
-			.catalog-folder {
-				scroll-margin-top: 96px;
-				margin-bottom: 24px;
-			}
-
-			.catalog-folder--root {
-				margin-bottom: 34px;
-				padding-bottom: 4px;
-				border-bottom: 1px solid #edf2f8;
-			}
-
-			.catalog-folder-head {
-				display: flex;
-				align-items: flex-start;
-				gap: 14px;
-				padding: 20px;
-				margin-bottom: 16px;
-				border-radius: 22px;
-				background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
-				border: 1px solid var(--line);
-			}
-
-			.catalog-folder-icon {
-				width: 50px;
-				height: 50px;
-				display: inline-flex;
-				align-items: center;
-				justify-content: center;
-				border-radius: 18px;
-				background: rgba(23, 78, 166, 0.08);
-				font-size: 24px;
-				line-height: 1;
-				flex-shrink: 0;
-			}
-
-			.catalog-folder-titles {
-				flex: 1;
-				min-width: 0;
-			}
-
-			.catalog-folder-kicker {
-				font-size: 12px;
-				font-weight: 800;
-				text-transform: uppercase;
-				letter-spacing: 0.08em;
-				color: var(--brand);
-				margin-bottom: 6px;
-			}
-
-			.folder-title {
-				font-size: clamp(22px, 3vw, 30px);
-				line-height: 1.15;
-				letter-spacing: -0.03em;
-				font-weight: 900;
-				color: var(--text);
-				margin-bottom: 8px;
-			}
-
-			.catalog-folder-meta {
-				font-size: 14px;
-				line-height: 1.55;
-				color: var(--muted);
-			}
-
-			.catalog-folder-promo {
-				display: grid;
-				gap: 6px;
-				margin-top: 14px;
-				padding: 14px 16px;
-				border-radius: 18px;
-				background: #eef4ff;
-				border: 1px solid #d9e6ff;
-			}
-
-			.catalog-folder-promo strong {
-				font-size: 14px;
-				line-height: 1.35;
-				color: var(--text);
-			}
-
-			.catalog-folder-promo span {
-				font-size: 14px;
-				line-height: 1.55;
-				color: #4d6282;
-			}
-
-			.subfolder-nav {
-				margin-bottom: 16px;
-			}
-
-			.subfolder-nav-title {
-				font-size: 12px;
-				font-weight: 900;
-				text-transform: uppercase;
-				letter-spacing: 0.08em;
-				color: #5e6f8f;
-				margin-bottom: 10px;
-			}
-
-			.subfolder-grid {
-				display: grid;
-				grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
-				gap: 12px;
-			}
-
-			.subfolder-card {
-				display: flex;
-				flex-direction: column;
-				align-items: flex-start;
-				gap: 6px;
-				padding: 16px;
-				background: #f8fbff;
-				border: 1px solid var(--line);
-				border-radius: 18px;
-				text-decoration: none;
-				color: inherit;
-				transition:
-					border-color 0.12s ease,
-					box-shadow 0.12s ease,
-					transform 0.12s ease;
-			}
-
-			.subfolder-card:hover {
-				border-color: #8bb0f4;
-				box-shadow: 0 10px 24px rgba(23, 78, 166, 0.1);
-				transform: translateY(-1px);
-			}
-
-			.subfolder-card-icon {
-				font-size: 18px;
-			}
-
-			.subfolder-card-name {
-				font-size: 16px;
-				font-weight: 800;
-				line-height: 1.3;
-				color: var(--text);
-			}
-
-			.subfolder-card-count {
-				font-size: 13px;
-				color: var(--muted);
-			}
-
-			.subfolder-card-hint {
-				font-size: 12px;
-				font-weight: 800;
-				color: var(--brand);
-			}
-
-			.product-list {
-				list-style: none;
-			}
-
-			.product-grid {
-				display: grid;
-				grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-				gap: 14px;
-			}
-
-			.product-card {
-				display: flex;
-				flex-direction: column;
-				gap: 14px;
-				min-height: 220px;
-				padding: 18px;
-				border: 1px solid var(--line);
-				border-radius: 22px;
-				background: linear-gradient(180deg, #fff 0%, #f8fbff 100%);
-				box-shadow: 0 10px 24px rgba(16, 35, 63, 0.06);
-			}
-
-			.product-list[data-expanded='false'] .product-card--extra {
-				display: none;
-			}
-
-			.product-list-actions {
-				margin-top: 12px;
-				display: flex;
-				justify-content: flex-start;
-			}
-
-			.product-more-btn {
-				min-height: 42px;
-				padding: 0 16px;
-				border-radius: 999px;
-				border: 1px solid #cddbf3;
-				background: #fff;
-				color: var(--brand);
-				font-size: 13px;
-				font-weight: 800;
-				cursor: pointer;
-			}
-
-			.product-more-btn:hover {
-				background: #f5f9ff;
-				border-color: #a8c0ef;
-			}
-
-			.product-card-top {
-				display: flex;
-				align-items: flex-start;
-				gap: 12px;
-			}
-
-			.product-card-media {
-				width: 48px;
-				height: 48px;
-				display: inline-flex;
-				align-items: center;
-				justify-content: center;
-				border-radius: 16px;
-				background: rgba(23, 78, 166, 0.08);
-				font-size: 22px;
-				flex-shrink: 0;
-			}
-
-			.product-card-main {
-				min-width: 0;
-			}
-
-			.product-name {
-				font-size: 17px;
-				line-height: 1.35;
-				font-weight: 800;
-				color: var(--text);
-				margin-bottom: 6px;
-			}
-
-			.product-sku {
-				font-size: 12px;
-				font-weight: 700;
-				letter-spacing: 0.04em;
-				text-transform: uppercase;
-				color: #6f7f98;
-			}
-
-			.product-desc {
-				font-size: 14px;
-				line-height: 1.55;
-				color: var(--muted);
-				display: -webkit-box;
-				-webkit-line-clamp: 3;
-				line-clamp: 3;
-				-webkit-box-orient: vertical;
-				overflow: hidden;
-			}
-
-			.product-meta {
-				display: flex;
-				flex-wrap: wrap;
-				align-items: center;
-				gap: 10px 14px;
-				margin-top: auto;
-			}
-
-			.price {
-				font-size: 22px;
-				line-height: 1;
-				font-weight: 900;
-				letter-spacing: -0.03em;
-				color: var(--text);
-			}
-
-			.availability-badge {
-				display: inline-flex;
-				align-items: center;
-				justify-content: center;
-				min-height: 32px;
-				padding: 0 12px;
-				border-radius: 999px;
-				font-size: 12px;
-				font-weight: 900;
-				letter-spacing: 0.04em;
-				text-transform: uppercase;
-			}
-
-			.availability-badge--order {
-				background: #fee2e2;
-				color: #9d174d;
-			}
-
-			.availability-badge--low {
-				background: #ffedd5;
-				color: #9a3412;
-			}
-
-			.availability-badge--medium {
-				background: #dbeafe;
-				color: #1d4ed8;
-			}
-
-			.availability-badge--plenty {
-				background: #d1fae5;
-				color: #047857;
-			}
-
-			.product-card-footer {
-				display: flex;
-				align-items: center;
-				justify-content: space-between;
-				gap: 12px;
-				padding-top: 12px;
-				border-top: 1px solid #edf2f8;
-			}
-
-			.product-foot-note {
-				font-size: 12px;
-				line-height: 1.45;
-				color: var(--muted);
-			}
-
-			.product-link {
-				font-size: 13px;
-				font-weight: 800;
-				color: var(--brand);
-				text-decoration: none;
-				white-space: nowrap;
-			}
-
-			.product-link:hover {
-				text-decoration: underline;
-			}
-
-			.orphan-head {
-				padding: 20px;
-				margin-bottom: 16px;
-				border: 1px dashed var(--line-strong);
-				border-radius: 20px;
-				background: #fbfdff;
-			}
-
-			.orphan-head .folder-title {
-				margin-bottom: 6px;
 			}
 
 			.is-hidden {
@@ -1119,13 +437,10 @@ const catalogStats = [
 					grid-template-columns: 1fr;
 				}
 
-				.toolbar {
+				.toolbar,
+				.image-policy-grid,
+				.hero-side-grid {
 					grid-template-columns: 1fr;
-				}
-
-				.toolbar-text {
-					justify-content: flex-start;
-					text-align: left;
 				}
 			}
 
@@ -1138,31 +453,13 @@ const catalogStats = [
 				.hero-side,
 				.toolbar,
 				.quick-nav,
-				.panel {
+				.image-policy {
 					border-radius: 20px;
-				}
-
-				.hero-card,
-				.hero-side,
-				.panel {
 					padding: 18px;
 				}
 
-				.toolbar {
-					padding: 14px;
-					position: static;
-				}
-
-				.hero-side-grid,
-				.product-grid,
-				.subfolder-grid,
 				.root-grid {
 					grid-template-columns: 1fr;
-				}
-
-				.product-card-footer {
-					flex-direction: column;
-					align-items: flex-start;
 				}
 			}
 		</style>
@@ -1176,14 +473,14 @@ const catalogStats = [
 						<span>/</span>
 						<span>Каталог оборудования</span>
 					</div>
-					<h1 class="hero-title">Оборудование для магазина, кафе и ресторана</h1>
+					<h1 class="hero-title">Оборудование и ПО для модернизации бизнеса</h1>
 					<p class="hero-text">
-						Каталог для собственника и управляющего: здесь можно подобрать оборудование и программное
-						обеспечение для модернизации магазина, кафе, ресторана или производства, а затем обсудить
-						поставку, установку, подключение и дальнейшее обслуживание.
+						Корневая страница каталога теперь работает как витрина направлений. Длинная выкладка товаров
+						убрана с главного уровня: каждый блок оборудования и программного обеспечения открывается на
+						своей отдельной странице с собственной структурой, изображением и подборкой позиций.
 					</p>
 					<div class="hero-actions">
-						<a class="hero-btn hero-btn--light" href="#catalog-sections">Смотреть разделы</a>
+						<a class="hero-btn hero-btn--light" href="#catalog-sections">Открыть разделы</a>
 						<a class="hero-btn hero-btn--ghost" href="/">Обсудить проект</a>
 					</div>
 				</div>
@@ -1193,7 +490,7 @@ const catalogStats = [
 						<p class="hero-side-title">Каталог в цифрах</p>
 						<div class="hero-side-grid">
 							{
-								catalogStats.map((item) => (
+								stats.map((item) => (
 									<div class="stat-card">
 										<div class="stat-value">{item.value}</div>
 										<div class="stat-label">{item.label}</div>
@@ -1204,12 +501,14 @@ const catalogStats = [
 					</div>
 					<div class="hero-notes">
 						<div class="hero-note">
-							<strong>Для проекта под ключ</strong>
-							Подбор оборудования и ПО, запуск рабочих мест, подключение, монтаж и сопровождение.
+							<strong>Отдельная страница на каждый раздел</strong>
+							У каждого направления теперь может быть свой визуальный образ, свои подкатегории и свой
+							набор товаров.
 						</div>
 						<div class="hero-note">
-							<strong>Для владельца бизнеса</strong>
-							Сначала видны понятные разделы, чтобы быстрее оценить решение для своего объекта и бюджета.
+							<strong>Готовая схема для изображений</strong>
+							Разделы уже привязаны к своим изображениям, а дальше по той же логике можно насыщать
+							картинками подкатегории и крупные ветки.
 						</div>
 					</div>
 				</aside>
@@ -1220,14 +519,14 @@ const catalogStats = [
 					<input
 						class="search-input"
 						type="search"
-						placeholder="Поиск по названию, артикулу, описанию или разделу"
+						placeholder="Поиск по направлению, задаче или типу оборудования"
 						data-catalog-search
 					/>
 					<span class="search-icon" aria-hidden="true">⌕</span>
 				</div>
 				<div class="toolbar-text">
 					<strong>Поиск:</strong>
-					ищите по названию товара, артикулу, разделу или типу оборудования.
+					быстрый фильтр по разделам каталога.
 				</div>
 			</div>
 
@@ -1238,98 +537,83 @@ const catalogStats = [
 					</div>
 				) : (
 					<>
-						{showTree && (
-							<section class="quick-nav">
+						{hasSections && (
+							<section class="quick-nav" id="catalog-sections">
 								<div class="quick-nav-head">
 									<div>
 										<p class="section-kicker">Основные направления</p>
 										<h2 class="section-title">Подберите нужный блок оборудования или ПО</h2>
 									</div>
 									<p class="section-text">
-										Сначала выберите направление для объекта: торговый зал, кухня, видеонаблюдение
-										или программное обеспечение. В каталоге оставлены только рабочие публичные разделы.
+										Каждое направление ведет на отдельную страницу раздела. Там уже можно спокойно
+										раскрывать подкатегории, основные позиции и смысловые изображения без перегруза
+										корня каталога.
 									</p>
 								</div>
 								<div class="root-grid">
-									{rootCategories.map((node) => (
-										<a
-											class="root-card"
-											href={`#cat-folder-${node.id}`}
-											data-root-card-for={node.id}
-										>
-											<span class="root-card-icon" aria-hidden="true">🏷️</span>
-											<div class="root-card-title">{node.name}</div>
-											<div class="root-card-copy">{getSectionCardCopy(node.id)}</div>
-											<div class="root-card-meta">
-												{node.branchProductCount.toLocaleString('ru-RU')} позиций в разделе
-											</div>
-											<div class="root-card-tags">
-												{node.children.slice(0, 3).map((child) => <span>{child.name}</span>)}
-											</div>
-										</a>
-									))}
+									{
+										sections.map((section) => (
+											<a
+												class="root-card"
+												href={`/catalog/${section.meta.slug}`}
+												data-root-card-search={`${section.meta.name} ${section.meta.cardCopy} ${section.meta.tags.join(' ')} ${section.node.children.map((child) => child.name).join(' ')}`}
+											>
+												<div class="root-card-media">
+													<img src={section.meta.image} alt={section.meta.name} loading="lazy" />
+												</div>
+												<div class="root-card-title">{section.meta.name}</div>
+												<div class="root-card-copy">{section.meta.cardCopy}</div>
+												<div class="root-card-meta">
+													{section.node.branchProductCount.toLocaleString('ru-RU')} позиций в разделе
+												</div>
+												<div class="root-card-tags">
+													{section.meta.tags.map((tag) => <span>{tag}</span>)}
+												</div>
+												<div class="root-card-link">Открыть раздел</div>
+											</a>
+										))
+									}
+								</div>
+								<div class="catalog-results-empty" data-catalog-empty>
+									По вашему запросу разделы не найдены. Попробуйте другое название направления.
 								</div>
 							</section>
 						)}
 
-						<section class="panel" id="catalog-sections">
+						<section class="image-policy">
 							<div class="quick-nav-head">
 								<div>
-									<p class="section-kicker">Структура каталога</p>
-									<h2 class="section-title">Разделы и товары</h2>
+									<p class="section-kicker">Изображения разделов</p>
+									<h2 class="section-title">Где хранить и как подбирать картинки по смыслу</h2>
 								</div>
 								<p class="section-text">
-									Список сокращен до понятных разделов. Внутри сначала показаны основные позиции,
-									а полный перечень можно раскрыть в нужной категории.
+									Файлы хранятся в <code>public/section-images</code>, а привязка к разделам описана в
+									<code>src/lib/catalogStorefront.ts</code>. Это позволяет отдельно вести визуалы и
+									отдельно управлять логикой витрины.
 								</p>
 							</div>
-
-							{
-								showTree ? (
-									<>
-										{storefrontSections.map((node) => (
-											<CatalogSection node={node} level={0} />
-										))}
-									</>
-								) : (
-									<ul class="product-list product-grid">
-										{products.map((p) => (
-											<li
-												class="product-card"
-												data-product-search={`${p.name || ''} ${p.sku || ''} ${p.description || ''}`.toLowerCase()}
-											>
-												<div class="product-card-top">
-													<div class="product-card-media" aria-hidden="true">📦</div>
-													<div class="product-card-main">
-														<div class="product-name">{p.name}</div>
-														{p.sku && <div class="product-sku">Артикул: {p.sku}</div>}
-													</div>
-												</div>
-												{p.description && <p class="product-desc">{p.description}</p>}
-												<div class="product-meta">
-													<span class="price">
-														{typeof p.price === 'number'
-															? `${p.price.toLocaleString('ru-RU')} ₽`
-															: p.price}
-													</span>
-													<span
-														class={`availability-badge availability-badge--${stockAvailabilityBand(p.quantity)}`}
-													>
-														{stockAvailabilityLabel(p.quantity)}
-													</span>
-												</div>
-												<div class="product-card-footer">
-													<span class="product-foot-note">Общий каталог</span>
-													<a class="product-link" href="/">Уточнить у консультанта</a>
-												</div>
-											</li>
-										))}
-									</ul>
-								)
-							}
-
-							<div class="catalog-results-empty" data-catalog-empty>
-								Ничего не найдено. Попробуйте часть названия, артикул или более широкий раздел.
+							<div class="image-policy-grid">
+								<div class="image-card">
+									<strong>Хранение</strong>
+									<span>
+										Лучше складывать разделовые изображения в `svg`, `webp` или `jpg` в папку
+										`public/section-images`, чтобы быстро заменять их без изменения маршрутов.
+									</span>
+								</div>
+								<div class="image-card">
+									<strong>Подбор по смыслу</strong>
+									<span>
+										Картинка выбирается не по одной карточке товара, а по типу решения:
+										автоматизация торговли, кухня, видеонаблюдение, программные продукты.
+									</span>
+								</div>
+								<div class="image-card">
+									<strong>Следующий уровень</strong>
+									<span>
+										По той же схеме можно добавить отдельные изображения уже для подкатегорий и
+										крупных внутренних веток на страницах разделов.
+									</span>
+								</div>
 							</div>
 						</section>
 					</>
@@ -1340,11 +624,7 @@ const catalogStats = [
 		<script>
 			document.addEventListener('DOMContentLoaded', function () {
 				const input = document.querySelector('[data-catalog-search]');
-				const products = Array.from(document.querySelectorAll('[data-product-search]'));
-				const folders = Array.from(document.querySelectorAll('[data-folder-id], .catalog-folder[data-folder-search]'));
-				const rootCards = Array.from(document.querySelectorAll('[data-root-card-for]'));
-				const productLists = Array.from(document.querySelectorAll('[data-product-list]'));
-				const productToggles = Array.from(document.querySelectorAll('[data-products-toggle]'));
+				const cards = Array.from(document.querySelectorAll('[data-root-card-search]'));
 				const empty = document.querySelector('[data-catalog-empty]');
 
 				function normalize(text) {
@@ -1356,69 +636,23 @@ const catalogStats = [
 						.trim();
 				}
 
-				function setListExpanded(list, expanded) {
-					list.setAttribute('data-expanded', expanded ? 'true' : 'false');
-					const section = list.closest('.catalog-folder');
-					if (!section) return;
-					const button = section.querySelector('[data-products-toggle]');
-					if (!button) return;
-					button.textContent = expanded ? button.getAttribute('data-collapse-label') : button.getAttribute('data-expand-label');
-				}
-
-				productLists.forEach(function (list) {
-					setListExpanded(list, false);
-				});
-
-				productToggles.forEach(function (button) {
-					button.addEventListener('click', function () {
-						const section = button.closest('.catalog-folder');
-						const list = section && section.querySelector('[data-product-list]');
-						if (!list) return;
-						const expanded = list.getAttribute('data-expanded') === 'true';
-						setListExpanded(list, !expanded);
-					});
-				});
-
 				function applySearch() {
 					if (!input) return;
 					const query = normalize(input.value);
 
-					productLists.forEach(function (list) {
-						setListExpanded(list, query.length > 0);
-					});
-
-					products.forEach(function (card) {
+					cards.forEach(function (card) {
 						if (!query) {
 							card.classList.remove('is-hidden');
 							return;
 						}
-						const haystack = normalize(card.getAttribute('data-product-search'));
+						const haystack = normalize(card.getAttribute('data-root-card-search'));
 						card.classList.toggle('is-hidden', !haystack.includes(query));
 					});
 
-					const reversedFolders = folders.slice().reverse();
-					reversedFolders.forEach(function (folder) {
-						if (!query) {
-							folder.classList.remove('is-hidden');
-							return;
-						}
-
-						const ownMatch = normalize(folder.getAttribute('data-folder-search')).includes(query);
-						const visibleProducts = folder.querySelector('[data-product-search]:not(.is-hidden)');
-						const visibleChildren = folder.querySelector('.folder-nested .catalog-folder:not(.is-hidden)');
-						folder.classList.toggle('is-hidden', !(ownMatch || visibleProducts || visibleChildren));
-					});
-
-					rootCards.forEach(function (card) {
-						const id = card.getAttribute('data-root-card-for');
-						const target = document.getElementById('cat-folder-' + id);
-						card.classList.toggle('is-hidden', !!(target && target.classList.contains('is-hidden')));
-					});
-
-					const hasVisible = products.some(function (card) {
-						return !card.classList.contains('is-hidden');
-					});
 					if (empty) {
+						const hasVisible = cards.some(function (card) {
+							return !card.classList.contains('is-hidden');
+						});
 						empty.classList.toggle('is-visible', !hasVisible && query.length > 0);
 					}
 				}
