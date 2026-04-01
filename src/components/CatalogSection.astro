@@ -208,9 +208,9 @@ const sectionPromo = level === 0 ? getSectionPromo(node.id) : null;
 							</div>
 							<div class="product-card-footer">
 								<span class="product-foot-note">{node.name}</span>
-								<a class="product-link" href={p.enrichmentSourceUrl || '/'}>
-									{p.enrichmentSourceUrl ? 'ТТХ и описание' : 'Уточнить у консультанта'}
-								</a>
+								<span class="product-link">
+									{p.enrichmentSourceUrl ? 'Характеристики в карточке' : 'Уточнить у консультанта'}
+								</span>
 							</div>
 						</li>
 					))}
@@ -594,15 +594,12 @@ const sectionPromo = level === 0 ? getSectionPromo(node.id) : null;
 	}
 
 	.product-link {
+		display: inline-flex;
+		align-items: center;
 		font-size: 13px;
 		font-weight: 800;
 		color: #174ea6;
-		text-decoration: none;
 		white-space: nowrap;
-	}
-
-	.product-link:hover {
-		text-decoration: underline;
 	}
 
 	.is-hidden {
