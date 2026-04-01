@@ -69,6 +69,12 @@ function isMeaningfulMatchKey(value: string): boolean {
 	return value.length >= 6 && /[a-zа-я]/i.test(value);
 }
 
+function hasModelLikeToken(value: string): boolean {
+	return normalizeText(value)
+		.split(' ')
+		.some((token) => /[a-zа-я]/i.test(token) && /\d/.test(token));
+}
+
 export function buildProductMeaningKeys(product: ProductLike): string[] {
 	const rawName = normalizeText(product.name);
 	const keys = new Set<string>();
@@ -131,6 +137,7 @@ export function matchProductEnrichment(
 	for (const key of productKeys) {
 		for (const [alias, record] of aliasMap.entries()) {
 			if (!isMeaningfulMatchKey(alias) || !isMeaningfulMatchKey(key)) continue;
+			if (!hasModelLikeToken(alias) || !hasModelLikeToken(key)) continue;
 			if (key.includes(alias) || alias.includes(key)) {
 				return record;
 			}

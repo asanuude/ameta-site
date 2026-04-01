@@ -214,7 +214,7 @@ const sectionEquipmentBuckets: Record<string, EquipmentBucket[]> = {
 			id: 'scales',
 			name: 'Весы',
 			priority: 2,
-			patterns: [/(весы|m er|mer |marta|штрих принт|штрих принт м|штрих slim|штрих слим)/i],
+			patterns: [/(весы|весовой|m er|mer |marta|штрих принт|штрих принт м|штрих slim|штрих слим)/i],
 		},
 		{
 			id: 'scanners',
@@ -229,22 +229,28 @@ const sectionEquipmentBuckets: Record<string, EquipmentBucket[]> = {
 			patterns: [/(терминал сбора данных|тсд|urovo|idata|cipher|cipherlab|smart slim|smart lite|smart t\d+)/i],
 		},
 		{
-			id: 'pos',
-			name: 'POS-моноблоки и кассовые узлы',
-			priority: 5,
-			patterns: [/(poscenter|моноблок|pos система|pos комп|pos компьютер|light pos|lightpos|minipos|atlas|sam4s|pos via|box pc|z1)/i],
-		},
-		{
 			id: 'label-printers',
 			name: 'Принтеры этикеток и чеков',
-			priority: 6,
-			patterns: [/(принтер этикет|принтер чек|tt 100|tt 200|tt41|tt42|tt631|tsc |te300|tdp 225|ttp 225|dh220|printer)/i],
+			priority: 5,
+			patterns: [/(принтер|термопринтер|принтер этикет|принтер чек|tt 100|tt 200|tt41|tt42|tt631|tsc |te300|tdp 225|ttp 225|dh220|zebra|gk420|gk 420|printer)/i],
 		},
 		{
 			id: 'cash-drawers',
 			name: 'Денежные ящики и прикассовая периферия',
-			priority: 7,
+			priority: 6,
 			patterns: [/(денежный ящик|ящик денежный|flip top|hpc 460|mk 410|ht 330|cd 330|дисплей покупателя|пин пад)/i],
+		},
+		{
+			id: 'pos',
+			name: 'POS-моноблоки и кассовые узлы',
+			priority: 7,
+			patterns: [/(моноблок|pos система|pos комп|pos компьютер|light pos|lightpos|minipos|atlas|sam4s|pos via|box pc|z1|pos[- ]?терминал|pos[- ]?система)/i],
+		},
+		{
+			id: 'peripherals',
+			name: 'Комплектующие и торговая периферия',
+			priority: 8,
+			patterns: [/(блок питания|аккумулятор|кабель|адаптер|комплект модерниз|комплект активац|модуль|флэш диск|дангл|ридер|считывател|клавиатур|подставк|базовый терминал|утм)/i],
 		},
 	],
 	food: [
@@ -356,16 +362,51 @@ function collectSectionProductEntries(node: GroupNode, trail: string[] = []): Se
 function classifySectionProduct(meta: CatalogSectionMeta, entry: SectionProductEntry): EquipmentBucket | null {
 	const buckets = sectionEquipmentBuckets[meta.slug] || [];
 	if (buckets.length === 0) return null;
-	const searchText = normalizeProductMeaning(
+	const productText = normalizeProductMeaning(
 		[
 			entry.product.name,
 			entry.product.description,
 			entry.product.enrichedDescription,
 			entry.product.sku,
-			...entry.trail,
 		].join(' ')
 	);
-	return buckets.find((bucket) => bucket.patterns.some((pattern) => pattern.test(searchText))) || null;
+	if (productText) {
+		const directMatches = buckets.filter((bucket) => bucket.patterns.some((pattern) => pattern.test(productText)));
+		if (directMatches.length > 0) {
+			if (meta.slug === 'retail') {
+				const byId = new Map(directMatches.map((bucket) => [bucket.id, bucket]));
+				if (byId.has('scales') && /(весы|весовой)/i.test(productText)) return byId.get('scales') || null;
+				if (
+					byId.has('cash-drawers') &&
+					/(денежный ящик|ящик денежный|дисплей покупателя|пин пад)/i.test(productText)
+				) {
+					return byId.get('cash-drawers') || null;
+				}
+				if (
+					byId.has('label-printers') &&
+					/(принтер|zebra|tsc|mertech dt|poscenter tt)/i.test(productText) &&
+					!/(ккт|ккм|фискальн|фн|регистратор)/i.test(productText)
+				) {
+					return byId.get('label-printers') || null;
+				}
+				if (
+					byId.has('peripherals') &&
+					/(блок питания|аккумулятор|кабель|адаптер|комплект модерниз|комплект активац|модуль|флэш диск|дангл|ридер|считывател|клавиатур|подставк|базовый терминал|утм)/i.test(
+						productText
+					) &&
+					!/(ккт|ккм|фискальн|регистратор)/i.test(productText)
+				) {
+					return byId.get('peripherals') || null;
+				}
+			}
+			return directMatches[0];
+		}
+	}
+	if (meta.slug === 'retail') return null;
+	const trailText = normalizeProductMeaning(entry.trail.join(' '));
+	return trailText
+		? buckets.find((bucket) => bucket.patterns.some((pattern) => pattern.test(trailText))) || null
+		: null;
 }
 
 function buildEquipmentSectionNode(meta: CatalogSectionMeta, node: GroupNode): GroupNode {
