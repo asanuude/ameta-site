@@ -65,6 +65,10 @@ function cleanupModelKey(value: string): string {
 		.trim();
 }
 
+function isMeaningfulMatchKey(value: string): boolean {
+	return value.length >= 6 && /[a-zа-я]/i.test(value);
+}
+
 export function buildProductMeaningKeys(product: ProductLike): string[] {
 	const rawName = normalizeText(product.name);
 	const keys = new Set<string>();
@@ -81,11 +85,11 @@ export function buildProductMeaningKeys(product: ProductLike): string[] {
 	const tokens = tokenizeProductName(product.name);
 	for (let i = 0; i < tokens.length - 1; i += 1) {
 		const pair = `${tokens[i]} ${tokens[i + 1]}`;
-		if (/\d/.test(pair)) keys.add(cleanupModelKey(pair));
+		if (/\d/.test(pair) && /[a-zа-я]/i.test(pair)) keys.add(cleanupModelKey(pair));
 	}
 	for (let i = 0; i < tokens.length - 2; i += 1) {
 		const triple = `${tokens[i]} ${tokens[i + 1]} ${tokens[i + 2]}`;
-		if (/\d/.test(triple)) keys.add(cleanupModelKey(triple));
+		if (/\d/.test(triple) && /[a-zа-я]/i.test(triple)) keys.add(cleanupModelKey(triple));
 	}
 
 	const sku = normalizeText(product.sku);
@@ -126,7 +130,7 @@ export function matchProductEnrichment(
 
 	for (const key of productKeys) {
 		for (const [alias, record] of aliasMap.entries()) {
-			if (alias.length < 5) continue;
+			if (!isMeaningfulMatchKey(alias) || !isMeaningfulMatchKey(key)) continue;
 			if (key.includes(alias) || alias.includes(key)) {
 				return record;
 			}
