@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { stockAvailabilityBand } from './stockAvailability';
+import { applyProductEnrichment, readProductEnrichmentCache, type ProductSpec } from './productEnrichment';
 
 export interface Group {
 	id: string;
@@ -16,6 +17,12 @@ export interface Product {
 	price?: number | string;
 	quantity?: number;
 	groupId?: string | null;
+	image?: string;
+	enrichedDescription?: string;
+	specs?: ProductSpec[];
+	enrichmentSourceUrl?: string;
+	enrichmentSourceTitle?: string;
+	enrichmentConfidence?: number;
 }
 
 export interface GroupNode {
@@ -368,7 +375,9 @@ function readCatalog(): { groups: Group[]; products: Product[] } {
 }
 
 export function getCatalogStorefront(): CatalogStorefrontResult {
-	const { groups, products } = readCatalog();
+	const { groups, products: rawProducts } = readCatalog();
+	const enrichmentRecords = readProductEnrichmentCache();
+	const products = rawProducts.map((product) => applyProductEnrichment(product, enrichmentRecords));
 	const tree = buildTree(groups, products, null);
 	const flatNodes = flattenNodes(tree);
 	const publicSections = catalogSectionMetas

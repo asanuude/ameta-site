@@ -10,6 +10,11 @@ interface Product {
 	price?: number | string;
 	quantity?: number;
 	groupId?: string | null;
+	image?: string;
+	enrichedDescription?: string;
+	specs?: Array<{ name?: string; value?: string }>;
+	enrichmentSourceUrl?: string;
+	enrichmentSourceTitle?: string;
 }
 
 interface GroupNode {
@@ -160,13 +165,35 @@ const sectionPromo = level === 0 ? getSectionPromo(node.id) : null;
 							)}
 						>
 							<div class="product-card-top">
-								<div class="product-card-media" aria-hidden="true">📦</div>
+								<div class="product-card-media">
+									{
+										p.image ? (
+											<img src={p.image} alt={p.name || 'Товар'} loading="lazy" />
+										) : (
+											<span aria-hidden="true">📦</span>
+										)
+									}
+								</div>
 								<div class="product-card-main">
 									<div class="product-name">{p.name}</div>
 									{p.sku && <div class="product-sku">Артикул: {p.sku}</div>}
 								</div>
 							</div>
-							{p.description && <p class="product-desc">{p.description}</p>}
+							{(p.enrichedDescription || p.description) && (
+								<p class="product-desc">{p.enrichedDescription || p.description}</p>
+							)}
+							{
+								Array.isArray(p.specs) &&
+									p.specs.length > 0 && (
+										<div class="product-specs">
+											{p.specs.slice(0, 4).map((spec) => (
+												<div class="product-spec">
+													<strong>{spec.name}:</strong> <span>{spec.value}</span>
+												</div>
+											))}
+										</div>
+									)
+							}
 							<div class="product-meta">
 								<span class="price">
 									{typeof p.price === 'number'
@@ -181,7 +208,9 @@ const sectionPromo = level === 0 ? getSectionPromo(node.id) : null;
 							</div>
 							<div class="product-card-footer">
 								<span class="product-foot-note">{node.name}</span>
-								<a class="product-link" href="/">Уточнить у консультанта</a>
+								<a class="product-link" href={p.enrichmentSourceUrl || '/'}>
+									{p.enrichmentSourceUrl ? 'ТТХ и описание' : 'Уточнить у консультанта'}
+								</a>
 							</div>
 						</li>
 					))}
@@ -440,6 +469,14 @@ const sectionPromo = level === 0 ? getSectionPromo(node.id) : null;
 		background: rgba(23, 78, 166, 0.08);
 		font-size: 22px;
 		flex-shrink: 0;
+		overflow: hidden;
+	}
+
+	.product-card-media img {
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
+		display: block;
 	}
 
 	.product-card-main {
@@ -471,6 +508,25 @@ const sectionPromo = level === 0 ? getSectionPromo(node.id) : null;
 		line-clamp: 3;
 		-webkit-box-orient: vertical;
 		overflow: hidden;
+	}
+
+	.product-specs {
+		display: grid;
+		gap: 8px;
+		padding: 12px;
+		border-radius: 16px;
+		background: #f8fbff;
+		border: 1px solid #e3ebf7;
+	}
+
+	.product-spec {
+		font-size: 12px;
+		line-height: 1.45;
+		color: #55657d;
+	}
+
+	.product-spec strong {
+		color: #10233f;
 	}
 
 	.product-meta {
