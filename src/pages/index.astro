@@ -189,6 +189,37 @@ import SpeedInsights from "@vercel/speed-insights/astro";
             display: flex;
             flex-wrap: wrap;
             gap: 0.5rem 1rem;
+            align-items: center;
+        }
+
+        .catalog-item-avail {
+            display: inline-flex;
+            align-items: center;
+            padding: 0.15rem 0.55rem;
+            border-radius: 999px;
+            font-size: 0.78rem;
+            font-weight: 700;
+            letter-spacing: 0.02em;
+        }
+
+        .catalog-item-avail--order {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+
+        .catalog-item-avail--low {
+            background: #ffedd5;
+            color: #9a3412;
+        }
+
+        .catalog-item-avail--medium {
+            background: #dbeafe;
+            color: #1e40af;
+        }
+
+        .catalog-item-avail--plenty {
+            background: #d1fae5;
+            color: #065f46;
         }
 
         .catalog-item-footer {
@@ -575,6 +606,39 @@ import SpeedInsights from "@vercel/speed-insights/astro";
                 return String(p);
             }
 
+            /** Дублирует src/lib/stockAvailability.ts — шкала без точного остатка. */
+            function parseQtyForAvail(raw) {
+                if (raw === null || raw === undefined || raw === '') return NaN;
+                const n =
+                    typeof raw === 'number'
+                        ? raw
+                        : parseFloat(String(raw).replace(/\s/g, '').replace(',', '.'));
+                return Number.isFinite(n) ? n : NaN;
+            }
+
+            function stockAvailabilityBandClient(raw) {
+                const n = parseQtyForAvail(raw);
+                if (!Number.isFinite(n) || n <= 0) return 'order';
+                if (n <= 2) return 'low';
+                if (n <= 10) return 'medium';
+                return 'plenty';
+            }
+
+            function stockAvailabilityLabelClient(raw) {
+                switch (stockAvailabilityBandClient(raw)) {
+                    case 'order':
+                        return 'Под заказ';
+                    case 'low':
+                        return 'Мало';
+                    case 'medium':
+                        return 'Много';
+                    case 'plenty':
+                        return 'Не иссякаемо';
+                    default:
+                        return 'Под заказ';
+                }
+            }
+
             /** Длинный список каталога: по pageSize позиций и кнопка «Дальше». */
             function addCatalogPagedMessage(introText, items, pageSize) {
                 const ps = Math.max(1, parseInt(pageSize, 10) || 5);
@@ -631,7 +695,10 @@ import SpeedInsights from "@vercel/speed-insights/astro";
                         row.className = 'catalog-item-row';
                         const name = escapeHtmlClient(item.name || '');
                         const price = formatPriceRu(item.price);
-                        const qty = escapeHtmlClient(item.quantity ?? '');
+                        const band = stockAvailabilityBandClient(item.quantity);
+                        const availLabel = escapeHtmlClient(
+                            stockAvailabilityLabelClient(item.quantity)
+                        );
                         row.innerHTML =
                             '<span class="catalog-item-num">' +
                             globalIdx +
@@ -644,9 +711,11 @@ import SpeedInsights from "@vercel/speed-insights/astro";
                             '<span>Цена: ' +
                             escapeHtmlClient(price) +
                             ' руб.</span>' +
-                            '<span>В наличии: ' +
-                            qty +
-                            ' шт.</span>' +
+                            '<span class="catalog-item-avail catalog-item-avail--' +
+                            band +
+                            '">' +
+                            availLabel +
+                            '</span>' +
                             '</div></div>';
                         listEl.appendChild(row);
                     });

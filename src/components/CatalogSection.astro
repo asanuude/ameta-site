@@ -1,5 +1,6 @@
 ---
 import CatalogSection from './CatalogSection.astro';
+import { stockAvailabilityBand, stockAvailabilityLabel } from '../lib/stockAvailability';
 
 interface Product {
 	id?: string;
@@ -16,31 +17,96 @@ interface GroupNode {
 	name: string;
 	products: Product[];
 	children: GroupNode[];
+	branchProductCount: number;
 }
 
 const { node } = Astro.props as { node: GroupNode };
+
+const posPlural = new Intl.PluralRules('ru');
+function pluralPos(n: number): string {
+	const r = posPlural.select(n);
+	if (r === 'one') return 'позиция';
+	if (r === 'few') return 'позиции';
+	return 'позиций';
+}
+
+let folderMeta = '';
+if (node.children.length > 0 && node.products.length > 0) {
+	folderMeta = `В этой папке: ${node.products.length} ${pluralPos(node.products.length)} · всего с подразделами: ${node.branchProductCount} ${pluralPos(node.branchProductCount)}`;
+} else if (node.children.length > 0) {
+	folderMeta =
+		node.branchProductCount > 0
+			? `С подразделами: ${node.branchProductCount} ${pluralPos(node.branchProductCount)}`
+			: 'Подразделы ниже';
+} else if (node.products.length > 0) {
+	folderMeta = `${node.products.length} ${pluralPos(node.products.length)}`;
+}
 ---
 
-<div class="folder-block" data-folder-id={node.id}>
-	<h2 class="folder-title">{node.name}</h2>
-	{node.products.length > 0 && (
-		<ul class="product-list">
-			{node.products.map((p) => (
-				<li class="product-card">
-					<div class="product-name">{p.name}</div>
-					{p.sku && <div class="product-sku">Код: {p.sku}</div>}
-					{p.description && <p class="product-desc">{p.description}</p>}
-					<div class="product-meta">
-						<span class="price">{typeof p.price === 'number' ? `${p.price.toLocaleString('ru-RU')} ₽` : p.price}</span>
-						<span class="qty">В наличии: {p.quantity ?? '—'}</span>
-					</div>
-				</li>
-			))}
-		</ul>
-	)}
-	{node.children.map((child) => (
-		<div class="folder-nested">
-			<CatalogSection node={child} />
+<section class="catalog-folder folder-block" id={`cat-folder-${node.id}`}>
+	<header class="catalog-folder-head">
+		<span class="catalog-folder-icon" aria-hidden="true">📁</span>
+		<div class="catalog-folder-titles">
+			<h2 class="folder-title">{node.name}</h2>
+			{folderMeta && <p class="catalog-folder-meta">{folderMeta}</p>}
 		</div>
-	))}
-</div>
+	</header>
+
+	{
+		node.children.length > 0 && (
+			<nav class="subfolder-nav" aria-label={`Подразделы: ${node.name}`}>
+				<div class="subfolder-nav-title">Подразделы</div>
+				<div class="subfolder-grid">
+					{node.children.map((c) => (
+						<a href={`#cat-folder-${c.id}`} class="subfolder-card">
+							<span class="subfolder-card-icon" aria-hidden="true">
+								📂
+							</span>
+							<span class="subfolder-card-name">{c.name}</span>
+							{c.branchProductCount > 0 && (
+								<span class="subfolder-card-count">
+									{c.branchProductCount} {pluralPos(c.branchProductCount)}
+								</span>
+							)}
+							<span class="subfolder-card-hint">Перейти ↓</span>
+						</a>
+					))}
+				</div>
+			</nav>
+		)
+	}
+
+	{
+		node.products.length > 0 && (
+			<ul class="product-list">
+				{node.products.map((p) => (
+					<li class="product-card">
+						<div class="product-name">{p.name}</div>
+						{p.sku && <div class="product-sku">Код: {p.sku}</div>}
+						{p.description && <p class="product-desc">{p.description}</p>}
+						<div class="product-meta">
+							<span class="price">
+								{typeof p.price === 'number'
+									? `${p.price.toLocaleString('ru-RU')} ₽`
+									: p.price}
+							</span>
+							<span
+								class={`availability-badge availability-badge--${stockAvailabilityBand(p.quantity)}`}
+							>
+								{stockAvailabilityLabel(p.quantity)}
+							</span>
+						</div>
+					</li>
+				))}
+			</ul>
+		)
+	}
+
+	{
+		node.children.map((child) => (
+			<div class="folder-nested">
+				<CatalogSection node={child} />
+			</div>
+		))
+	}
+</section>

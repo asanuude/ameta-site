@@ -724,8 +724,26 @@ export default async function handler(req, res) {
     }
 
     try {
-        const { question, sessionId = 'default', lastUserProductQuery = '' } = req.body;
-        
+        let body = req.body;
+        if (body == null) {
+            body = {};
+        } else if (typeof body === 'string') {
+            try {
+                body = JSON.parse(body);
+            } catch {
+                return res.status(400).json({
+                    answer:
+                        'Некорректное тело запроса. Нужен JSON с полем question, заголовок Content-Type: application/json.',
+                });
+            }
+        }
+        if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+            body = {};
+        }
+        const sessionId = body.sessionId != null ? String(body.sessionId) : 'default';
+        const lastUserProductQuery = String(body.lastUserProductQuery ?? '');
+        const question = String(body.question ?? '');
+
         console.log('🔍 ПОЛУЧЕН ЗАПРОС:', JSON.stringify({ question, sessionId }));
         
         const products = await loadCatalog();

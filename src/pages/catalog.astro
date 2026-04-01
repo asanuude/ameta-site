@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import CatalogSection from '../components/CatalogSection.astro';
 import SpeedInsights from '@vercel/speed-insights/astro';
+import { stockAvailabilityBand, stockAvailabilityLabel } from '../lib/stockAvailability';
 
 interface Group {
 	id: string;
@@ -25,6 +26,8 @@ interface GroupNode {
 	name: string;
 	products: Product[];
 	children: GroupNode[];
+	/** Позиции в этом узле и во всех вложенных папках */
+	branchProductCount: number;
 }
 
 const catalogPath = path.join(process.cwd(), 'public', 'catalog.json');
@@ -48,12 +51,18 @@ try {
 function buildTree(parentId: string | null | undefined): GroupNode[] {
 	return groups
 		.filter((g) => (g.parentId ?? null) === (parentId ?? null))
-		.map((g) => ({
-			id: g.id,
-			name: g.name,
-			products: products.filter((p) => p.groupId === g.id),
-			children: buildTree(g.id),
-		}));
+		.map((g) => {
+			const children = buildTree(g.id);
+			const ownProducts = products.filter((p) => p.groupId === g.id);
+			const inChildren = children.reduce((sum, ch) => sum + ch.branchProductCount, 0);
+			return {
+				id: g.id,
+				name: g.name,
+				products: ownProducts,
+				children,
+				branchProductCount: ownProducts.length + inChildren,
+			};
+		});
 }
 
 const groupIds = new Set(groups.map((g) => g.id));
@@ -129,18 +138,108 @@ const showTree = groups.length > 0;
 				box-shadow: 0 16px 48px rgba(0, 0, 0, 0.35);
 			}
 			.folder-block {
-				margin-bottom: 1.5rem;
+				margin-bottom: 0;
 			}
 			.folder-nested {
-				margin-left: 0.75rem;
-				padding-left: 1rem;
-				border-left: 3px solid #e8ecf4;
+				margin-top: 1.25rem;
+				margin-left: 0;
+				padding-left: 1.15rem;
+				border-left: 3px solid #c7d2fe;
+			}
+			.catalog-folder {
+				scroll-margin-top: 1rem;
+				margin-bottom: 2rem;
+			}
+			.catalog-folder-head {
+				display: flex;
+				align-items: flex-start;
+				gap: 0.85rem;
+				padding: 1rem 1.15rem;
+				margin-bottom: 1rem;
+				background: linear-gradient(120deg, #f8fafc 0%, #eef2ff 100%);
+				border-radius: 16px;
+				border: 1px solid #e2e8f0;
+			}
+			.catalog-folder-icon {
+				font-size: 1.75rem;
+				line-height: 1;
+				filter: drop-shadow(0 2px 4px rgba(15, 52, 96, 0.12));
+			}
+			.catalog-folder-titles {
+				flex: 1;
+				min-width: 0;
 			}
 			.folder-title {
-				font-size: 1.2rem;
-				margin-bottom: 0.75rem;
+				font-size: 1.25rem;
+				margin: 0 0 0.35rem;
 				color: #0f3460;
+				font-weight: 800;
+				letter-spacing: -0.02em;
+				line-height: 1.25;
+			}
+			.catalog-folder-meta {
+				margin: 0;
+				font-size: 0.88rem;
+				color: #64748b;
+				font-weight: 500;
+			}
+			.subfolder-nav {
+				margin-bottom: 1.25rem;
+			}
+			.subfolder-nav-title {
+				font-size: 0.72rem;
+				font-weight: 800;
+				text-transform: uppercase;
+				letter-spacing: 0.07em;
+				color: #64748b;
+				margin-bottom: 0.65rem;
+			}
+			.subfolder-grid {
+				display: grid;
+				grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+				gap: 0.75rem;
+			}
+			.subfolder-card {
+				display: flex;
+				flex-direction: column;
+				align-items: flex-start;
+				gap: 0.25rem;
+				padding: 0.85rem 1rem;
+				background: #fff;
+				border: 1px solid #e2e8f0;
+				border-radius: 14px;
+				text-decoration: none;
+				color: inherit;
+				transition:
+					border-color 0.15s ease,
+					box-shadow 0.15s ease,
+					transform 0.12s ease;
+				box-shadow: 0 2px 8px rgba(15, 52, 96, 0.06);
+			}
+			.subfolder-card:hover {
+				border-color: #818cf8;
+				box-shadow: 0 6px 20px rgba(67, 56, 202, 0.12);
+				transform: translateY(-1px);
+			}
+			.subfolder-card-icon {
+				font-size: 1.35rem;
+				line-height: 1;
+			}
+			.subfolder-card-name {
 				font-weight: 700;
+				font-size: 0.95rem;
+				color: #0f3460;
+				line-height: 1.3;
+			}
+			.subfolder-card-hint {
+				font-size: 0.75rem;
+				font-weight: 600;
+				color: #6366f1;
+			}
+			.subfolder-card-count {
+				font-size: 0.78rem;
+				color: #94a3b8;
+				font-weight: 500;
 			}
 			.product-list {
 				list-style: none;
@@ -180,8 +279,51 @@ const showTree = groups.length > 0;
 				font-weight: 800;
 				color: #0f3460;
 			}
-			.qty {
-				color: #64748b;
+			.availability-badge {
+				display: inline-flex;
+				align-items: center;
+				padding: 0.2rem 0.65rem;
+				border-radius: 999px;
+				font-size: 0.78rem;
+				font-weight: 700;
+				letter-spacing: 0.02em;
+			}
+			.availability-badge--order {
+				background: #fee2e2;
+				color: #991b1b;
+			}
+			.availability-badge--low {
+				background: #ffedd5;
+				color: #9a3412;
+			}
+			.availability-badge--medium {
+				background: #dbeafe;
+				color: #1e40af;
+			}
+			.availability-badge--plenty {
+				background: #d1fae5;
+				color: #065f46;
+			}
+			.catalog-tree-intro {
+				margin-bottom: 1.75rem;
+				padding: 1.1rem 1.25rem;
+				background: linear-gradient(135deg, #f0f4ff 0%, #e8f4fc 100%);
+				border-radius: 16px;
+				border: 1px solid #c7d2fe;
+			}
+			.catalog-tree-intro-lead {
+				font-size: 0.72rem;
+				font-weight: 800;
+				text-transform: uppercase;
+				letter-spacing: 0.08em;
+				color: #4338ca;
+				margin-bottom: 0.35rem;
+			}
+			.catalog-tree-intro-text {
+				font-size: 0.95rem;
+				color: #334155;
+				line-height: 1.5;
+				margin: 0;
 			}
 			.empty {
 				text-align: center;
@@ -196,8 +338,8 @@ const showTree = groups.length > 0;
 				<div>
 					<h1>Каталог</h1>
 					<p class="hint">
-						Структура папок совпадает с группами из CommerceML (выгрузка 1С). Обновление — POST
-						<code>/api/update-catalog</code> с файлами import*.xml.
+						Справочник групп как в 1С: удобный просмотр по папкам. Наличие показано шкалой (без точного
+						остатка). Обновление каталога — POST <code>/api/update-catalog</code> (import*.xml).
 					</p>
 				</div>
 				<nav class="nav">
@@ -210,6 +352,13 @@ const showTree = groups.length > 0;
 						<p class="empty">Каталог пуст. Загрузите выгрузку 1С или заполните public/catalog.json.</p>
 					) : showTree ? (
 						<>
+							<div class="catalog-tree-intro">
+								<p class="catalog-tree-intro-lead">Навигация по разделам</p>
+								<p class="catalog-tree-intro-text">
+									Выберите подраздел ниже — страница прокрутится к нужной папке. В каждой карточке
+									товара указана доступность: под заказ, мало, много или не иссякаемо.
+								</p>
+							</div>
 							{tree.map((node) => (
 								<CatalogSection node={node} />
 							))}
@@ -228,7 +377,11 @@ const showTree = groups.length > 0;
 															? `${p.price.toLocaleString('ru-RU')} ₽`
 															: p.price}
 													</span>
-													<span class="qty">В наличии: {p.quantity ?? '—'}</span>
+													<span
+														class={`availability-badge availability-badge--${stockAvailabilityBand(p.quantity)}`}
+													>
+														{stockAvailabilityLabel(p.quantity)}
+													</span>
 												</div>
 											</li>
 										))}
@@ -251,7 +404,11 @@ const showTree = groups.length > 0;
 													? `${p.price.toLocaleString('ru-RU')} ₽`
 													: p.price}
 											</span>
-											<span class="qty">В наличии: {p.quantity ?? '—'}</span>
+											<span
+												class={`availability-badge availability-badge--${stockAvailabilityBand(p.quantity)}`}
+											>
+												{stockAvailabilityLabel(p.quantity)}
+											</span>
 										</div>
 									</li>
 								))}
