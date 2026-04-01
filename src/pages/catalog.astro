@@ -108,6 +108,16 @@ function scoreDisplayProduct(product: Product): number {
 	);
 }
 
+function shouldHideDisplayProduct(product: Product): boolean {
+	const name = sanitizeProductName(product.name).toLowerCase();
+	return (
+		parsePriceValue(product.price) <= 0 ||
+		/(ремонт|поверк|техническое обслуживание|техобслуж|монтаж|демонтаж|аренда|услуг|услуга|работы|возмещение расходов)/i.test(
+			name
+		)
+	);
+}
+
 function prepareDisplayProduct(product: Product): Product {
 	return {
 		...product,
@@ -121,6 +131,7 @@ function dedupeProductsForDisplay(products: Product[], seenKeys: Set<string>): P
 
 	for (const rawProduct of products) {
 		const product = prepareDisplayProduct(rawProduct);
+		if (shouldHideDisplayProduct(product)) continue;
 		const key =
 			normalizeProductMeaning(product.name) ||
 			`${String(product.sku || '').trim()}::${String(product.id || '').trim()}`;
