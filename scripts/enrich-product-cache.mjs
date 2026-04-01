@@ -116,6 +116,32 @@ const providers = [
 		],
 	},
 	{
+		modelKey: 'viki print 57',
+		brand: 'Viki / Дримкас',
+		model: 'Viki Print 57 Ф',
+		sourceUrl: 'https://torg.1c.ru/equipment/onlayn-kassy/kkt-viki-print-57-f-bez-fn/',
+		sourceTitle: '1С:Торг - Viki Print 57 Ф',
+		imageFileName: 'viki-print-57.png',
+		aliases: [
+			'viki print 57',
+			'viki print 57 ф',
+			'вики принт 57',
+			'ккт viki print 57 ф',
+			'ккт вики принт 57 ф',
+			'птк viki print 57 kф',
+		],
+		fallbackDescription:
+			'Компактный фискальный регистратор для малой и средней розницы, услуг, логистики и HoReCa. Подходит для подключения к кассовой программе на компьютере, POS-терминале или смартфоне.',
+		fallbackSpecs: [
+			{ name: 'Способ печати', value: 'Термопечать' },
+			{ name: 'Ширина ленты', value: '57 мм' },
+			{ name: 'Скорость печати', value: '100 мм/сек' },
+			{ name: 'Разрешение печати', value: '203 dpi' },
+			{ name: 'Интерфейсы', value: 'RJ-12, USB, RS-232' },
+			{ name: 'Габариты', value: '22,5 x 12,4 x 10 см' },
+		],
+	},
+	{
 		modelKey: 'атол sigma 7',
 		brand: 'АТОЛ',
 		model: 'Sigma 7',
@@ -190,6 +216,8 @@ const providers = [
 		sourceTitle: '1С:Торг - АТОЛ SB3100 BT',
 		imageFileName: 'atol-sb3100-bt.png',
 		aliases: ['атол sb3100 bt', 'сканер атол sb3100 bt', 'sb3100 bt', 'атол sb3100 bluetooth'],
+		fallbackDescription:
+			'Беспроводной 2D-сканер штрихкодов для работы с маркировкой, торговым залом и складом. Подходит для длительной смены без подзарядки и подключения по Bluetooth или USB.',
 		fallbackSpecs: [
 			{ name: 'Тип сканера', value: '2D Imager' },
 			{ name: 'Разрешение', value: '640x480' },
@@ -220,6 +248,182 @@ const providers = [
 			{ name: 'Класс защиты', value: 'IP52' },
 			{ name: 'Интерфейсы', value: 'USB (HID, COM)' },
 			{ name: 'Вес', value: '150 гр' },
+		],
+	},
+	{
+		modelKey: 'атол marta',
+		brand: 'АТОЛ',
+		model: 'MARTA',
+		sourceUrl: 'https://torg.1c.ru/equipment/vesy/vesy-torgovye-atol-marta-so-stoykoy-usb/',
+		sourceTitle: '1С:Торг - Весы АТОЛ MARTA',
+		imageFileName: 'atol-marta.png',
+		aliases: [
+			'атол marta',
+			'весы атол marta',
+			'весы атол marta со стойкой',
+			'весы атол marta usb',
+			'весы атол marta rs 232',
+		],
+		fallbackDescription:
+			'Торговые весы для магазина, прикассовой зоны и общепита. Поддерживают расчет стоимости, работу от сети и аккумулятора, варианты со стойкой и подключение по RS-232 или USB.',
+		fallbackSpecs: [
+			{ name: 'Наибольший предел взвешивания', value: '30 кг' },
+			{ name: 'Дискретность отчета', value: '1 / 2 / 5 гр' },
+			{ name: 'Питание', value: 'Сеть / АКБ' },
+			{ name: 'Тип дисплея', value: 'ЖК с подсветкой' },
+			{ name: 'Размер платформы', value: '32 x 23 см' },
+			{ name: 'Габариты', value: '33 x 32 x 11,1 см' },
+		],
+	},
+	{
+		modelKey: 'm er 223 ac 15 2',
+		brand: 'Mertech',
+		model: 'M-ER 223 AC-15.2',
+		sourceUrl:
+			'https://torg.1c.ru/equipment/vesy/vesy-nastolnye-torgovye-bez-podklyucheniya-k-pk-m-er-223-ac-15-2-mary-lcd/',
+		sourceTitle: '1С:Торг - Весы M-ER 223 AC-15.2',
+		imageFileName: 'mer-223-ac-15-2.png',
+		aliases: [
+			'm er 223 ac 15 2',
+			'm er 223 aс 15 2',
+			'весы m er 223 ac 15 2',
+			'весы m er 223 aс 15 2',
+			'm er 223 mary',
+		],
+		fallbackDescription:
+			'Компактные торговые весы для магазина и выездной торговли. Подходят для фасовки и продажи весовых товаров, работают автономно до нескольких месяцев без подзарядки.',
+		fallbackSpecs: [
+			{ name: 'Дискретность', value: '2 гр' },
+			{ name: 'Вес товара', value: 'От 40 гр до 15 кг' },
+			{ name: 'Размер платформы', value: '32,5 x 26 см' },
+			{ name: 'Память цен', value: '13 ячеек' },
+			{ name: 'Тип дисплея', value: 'LCD (2 шт)' },
+			{ name: 'Габариты', value: '35 x 33,5 x 10,5 см' },
+		],
+	},
+	{
+		modelKey: 'm er 326 ac 15 2',
+		brand: 'Mertech',
+		model: 'M-ER 326 AC-15.2',
+		sourceUrl:
+			'https://torg.1c.ru/equipment/vesy/vesy-nastolnye-torgovye-bez-podklyucheniya-k-pk-m-er-326-ac-15-2-slim-lcd-belye/',
+		sourceTitle: '1С:Торг - Весы M-ER 326 AC-15.2',
+		imageFileName: 'mer-326-ac-15-2.png',
+		aliases: [
+			'm er 326 ac 15 2',
+			'm er 326 aс 15 2',
+			'весы m er 326 ac 15 2',
+			'весы m er 326 aс 15 2',
+			'm er 326 slim 15 2',
+		],
+		fallbackDescription:
+			'Торговые настольные весы для розницы и выездной торговли. Компактны, работают в широком диапазоне температур и поддерживают автономную работу до 120 дней.',
+		fallbackSpecs: [
+			{ name: 'Дискретность', value: '2 гр' },
+			{ name: 'Вес товара', value: 'От 40 гр до 15 кг' },
+			{ name: 'Размер платформы', value: '31,5 x 23,5 см' },
+			{ name: 'Память цен', value: '2 ячейки' },
+			{ name: 'Тип дисплея', value: 'LCD (2 шт)' },
+			{ name: 'Габариты', value: '33 x 34,5 x 11,5 см' },
+		],
+	},
+	{
+		modelKey: 'm er 326 ac 32 5',
+		brand: 'Mertech',
+		model: 'M-ER 326 AC-32.5',
+		sourceUrl:
+			'https://torg.1c.ru/equipment/vesy/vesy-nastolnye-torgovye-bez-podklyucheniya-k-pk-m-er-326-ac-32-5-slim-lcd-belye/',
+		sourceTitle: '1С:Торг - Весы M-ER 326 AC-32.5',
+		imageFileName: 'mer-326-ac-32-5.png',
+		aliases: [
+			'm er 326 ac 32 5',
+			'm er 326 aс 32 5',
+			'весы m er 326 ac 32 5',
+			'весы m er 326 aс 32 5',
+			'm er 326 slim 32 5',
+		],
+		fallbackDescription:
+			'Торговые настольные весы для магазина и выездной торговли с повышенным пределом взвешивания до 32 кг. Подходят для повседневной работы в рознице.',
+		fallbackSpecs: [
+			{ name: 'Дискретность', value: '5 гр' },
+			{ name: 'Вес товара', value: 'От 100 гр до 32 кг' },
+			{ name: 'Размер платформы', value: '31,5 x 23,5 см' },
+			{ name: 'Память цен', value: '2 ячейки' },
+			{ name: 'Тип дисплея', value: 'LCD (2 шт)' },
+			{ name: 'Габариты', value: '33 x 34,5 x 11,5 см' },
+		],
+	},
+	{
+		modelKey: 'poscenter pos100',
+		brand: 'POScenter',
+		model: 'POS100',
+		sourceUrl: 'https://torg.1c.ru/equipment/pos-oborudovanie/pos-sensornyy-monoblok-pos100-128gb/',
+		sourceTitle: '1С:Торг - POScenter POS100',
+		imageFileName: 'poscenter-pos100.png',
+		aliases: [
+			'poscenter pos100',
+			'poscenter pos 100',
+			'моноблок poscenter pos100',
+			'моноблок poscenter pos 100',
+			'pos сенсорный моноблок poscenter pos100',
+		],
+		fallbackDescription:
+			'Сенсорный POS-моноблок для магазина и кафе. Подходит для организации рабочего места кассира, подключения периферии и круглодневной эксплуатации на торговой точке.',
+		fallbackSpecs: [
+			{ name: 'Экран', value: '15" LED, 1024x768, емкостной P-CAP' },
+			{ name: 'Процессор', value: 'Celeron 1900' },
+			{ name: 'ОЗУ', value: '4 Гб DDR3L, расширяется до 8 Гб' },
+			{ name: 'ПЗУ', value: '128 Гб' },
+			{ name: 'Порты', value: '2 x RS-232, 6 x USB, LAN, VGA, audio' },
+			{ name: 'Габариты', value: '43 x 42 x 29 см' },
+		],
+	},
+	{
+		modelKey: 'urovo dt30',
+		brand: 'Urovo',
+		model: 'DT30',
+		sourceUrl: 'https://torg.1c.ru/equipment/terminaly-sbora-dannykh/DT30-AZ2S9E4000/',
+		sourceTitle: '1С:Торг - Urovo DT30',
+		imageFileName: 'urovo-dt30.png',
+		aliases: [
+			'urovo dt30',
+			'тсд urovo dt30',
+			'терминал сбора данных urovo dt30',
+			'urovo dt30 android 9',
+		],
+		fallbackDescription:
+			'Терминал сбора данных для склада, магазина и мобильных операций. Подходит для маркировки, инвентаризации и приемки товара, сочетая сенсорный экран, клавиатуру и 2D-сканер.',
+		fallbackSpecs: [
+			{ name: 'Операционная система', value: 'Android 9' },
+			{ name: 'Память', value: '2 Гб RAM / 16 Гб ROM' },
+			{ name: 'Сканер', value: '2D Zebra SE4710' },
+			{ name: 'Аккумулятор', value: '4500 мАч' },
+			{ name: 'Защита', value: 'IP67' },
+			{ name: 'Беспроводная связь', value: 'Wi-Fi, Bluetooth, NFC, GPS' },
+		],
+	},
+	{
+		modelKey: 'urovo dt40',
+		brand: 'Urovo',
+		model: 'DT40',
+		sourceUrl: 'https://torg.1c.ru/equipment/terminaly-sbora-dannykh/tsd-urovo-dt40-SH7S9E401X/',
+		sourceTitle: '1С:Торг - Urovo DT40',
+		imageFileName: 'urovo-dt40.png',
+		aliases: [
+			'urovo dt40',
+			'тсд urovo dt40',
+			'терминал сбора данных urovo dt40',
+			'urovo dt40 android 9',
+		],
+		fallbackDescription:
+			'Мощный терминал сбора данных для склада, производства и торговли. Подходит для приемки, инвентаризации, отгрузки и работы с маркированной продукцией.',
+		fallbackSpecs: [
+			{ name: 'Процессор', value: 'Qualcomm SD 450, 8 x 1.8 ГГц' },
+			{ name: 'Операционная система', value: 'Android 9' },
+			{ name: 'Память', value: '3 Гб RAM / 32 Гб ROM' },
+			{ name: 'Сканер', value: '2D Imager Honeywell HS7' },
+			{ name: 'Защита', value: 'IP67, падение до 1,5 м' },
+			{ name: 'Аккумулятор', value: '4500 мАч' },
 		],
 	},
 ];
@@ -329,7 +533,12 @@ async function enrichFrom1CTorg(provider) {
 		model: provider.model,
 		aliases: provider.aliases,
 		image: `/product-images/${provider.imageFileName}`,
-		description: description || provider.fallbackDescription || '',
+		description:
+			description &&
+			description.length >= 80 &&
+			!/все обновления бесплатные|тариф «базовый»|ккт все обновления/i.test(description)
+				? description
+				: provider.fallbackDescription || description || '',
 		specs: specs.length > 0 ? specs : provider.fallbackSpecs,
 		sourceUrl: provider.sourceUrl,
 		sourceTitle: provider.sourceTitle,
@@ -341,7 +550,11 @@ async function enrichFrom1CTorg(provider) {
 async function main() {
 	const items = [];
 	for (const provider of providers) {
-		items.push(await enrichFrom1CTorg(provider));
+		try {
+			items.push(await enrichFrom1CTorg(provider));
+		} catch (error) {
+			console.warn(`WARN: ${provider.modelKey}: ${error instanceof Error ? error.message : String(error)}`);
+		}
 	}
 	fs.mkdirSync(path.dirname(cachePath), { recursive: true });
 	fs.writeFileSync(
