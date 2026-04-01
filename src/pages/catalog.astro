@@ -62,8 +62,85 @@ function compareGroups(a: GroupNode, b: GroupNode): number {
 	return compareNames(a.name, b.name);
 }
 
+function parsePriceValue(raw: unknown): number {
+	const n =
+		typeof raw === 'number'
+			? raw
+			: parseFloat(String(raw ?? '').replace(/\s/g, '').replace(',', '.'));
+	return Number.isFinite(n) ? n : 0;
+}
+
 function flattenNodes(nodes: GroupNode[]): GroupNode[] {
 	return nodes.flatMap((node) => [node, ...flattenNodes(node.children)]);
+}
+
+function sanitizeProductName(name: unknown): string {
+	return String(name || '')
+		.replace(/\s+/g, ' ')
+		.replace(/\s+([,.;:!?])/g, '$1')
+		.replace(/!{2,}/g, '!')
+		.replace(/\(\s+/g, '(')
+		.replace(/\s+\)/g, ')')
+		.replace(/"\s+/g, '"')
+		.replace(/\s+"/g, ' "')
+		.trim();
+}
+
+function sanitizeProductDescription(desc: unknown): string {
+	return String(desc || '').replace(/\s+/g, ' ').trim();
+}
+
+function normalizeProductMeaning(name: unknown): string {
+	return sanitizeProductName(name)
+		.toLowerCase()
+		.replace(/ё/g, 'е')
+		.replace(/[^a-zа-я0-9]+/gi, ' ')
+		.replace(/\s+/g, ' ')
+		.trim();
+}
+
+function scoreDisplayProduct(product: Product): number {
+	return (
+		(Number(product.quantity) > 0 ? 1000 : 0) +
+		(parsePriceValue(product.price) > 0 ? 100 : 0) +
+		(sanitizeProductDescription(product.description) ? 10 : 0) +
+		(String(product.sku || '').trim() ? 5 : 0)
+	);
+}
+
+function prepareDisplayProduct(product: Product): Product {
+	return {
+		...product,
+		name: sanitizeProductName(product.name),
+		description: sanitizeProductDescription(product.description),
+	};
+}
+
+function dedupeProductsForDisplay(products: Product[], seenKeys: Set<string>): Product[] {
+	const bestByMeaning = new Map<string, Product>();
+
+	for (const rawProduct of products) {
+		const product = prepareDisplayProduct(rawProduct);
+		const key =
+			normalizeProductMeaning(product.name) ||
+			`${String(product.sku || '').trim()}::${String(product.id || '').trim()}`;
+		if (!key) continue;
+		const prev = bestByMeaning.get(key);
+		if (!prev || scoreDisplayProduct(product) > scoreDisplayProduct(prev)) {
+			bestByMeaning.set(key, product);
+		}
+	}
+
+	const unique = [...bestByMeaning.entries()]
+		.filter(([key]) => {
+			if (seenKeys.has(key)) return false;
+			seenKeys.add(key);
+			return true;
+		})
+		.map(([, product]) => product)
+		.sort(compareProducts);
+
+	return unique;
 }
 
 function sanitizeDisplayName(name: string): string {
@@ -115,7 +192,7 @@ function clonePublicNode(node: GroupNode): GroupNode | null {
 	const visibleChildren = node.children
 		.map((child) => clonePublicNode(child))
 		.filter((child): child is GroupNode => Boolean(child));
-	const visibleOwnProducts = node.products;
+	const visibleOwnProducts = node.products.map((product) => prepareDisplayProduct(product));
 	const hidden = shouldHidePublicNode(node.name);
 
 	if (hidden && visibleChildren.length === 0 && visibleOwnProducts.length === 0) {
@@ -135,10 +212,30 @@ function clonePublicNode(node: GroupNode): GroupNode | null {
 	return {
 		...node,
 		name: sanitizeDisplayName(node.name),
+		products: visibleOwnProducts,
 		children: visibleChildren,
 		branchProductCount:
 			visibleOwnProducts.length +
 			visibleChildren.reduce((sum, child) => sum + child.branchProductCount, 0),
+	};
+}
+
+function dedupePublicNodeForDisplay(node: GroupNode, seenKeys: Set<string>): GroupNode | null {
+	const children = node.children
+		.map((child) => dedupePublicNodeForDisplay(child, seenKeys))
+		.filter((child): child is GroupNode => Boolean(child));
+	const products = dedupeProductsForDisplay(node.products, seenKeys);
+	const branchProductCount = products.length + children.reduce((sum, child) => sum + child.branchProductCount, 0);
+
+	if (branchProductCount === 0 && children.length === 0) {
+		return null;
+	}
+
+	return {
+		...node,
+		products,
+		children,
+		branchProductCount,
 	};
 }
 
@@ -209,8 +306,12 @@ const publicSections = [
 	makePublicSection('public-software', 'ПО, лицензии и ОФД', ['!ГЦТО'], flatNodes),
 	makePublicSection('public-carwash', 'Оборудование для автомойки', ['Автомойка'], flatNodes),
 ].filter((node): node is GroupNode => Boolean(node));
-const showTree = publicSections.length > 0;
-const rootCategories = publicSections.slice(0, 12);
+const seenProductMeanings = new Set<string>();
+const storefrontSections = publicSections
+	.map((node) => dedupePublicNodeForDisplay(node, seenProductMeanings))
+	.filter((node): node is GroupNode => Boolean(node));
+const showTree = storefrontSections.length > 0;
+const rootCategories = storefrontSections.slice(0, 12);
 const publicProductIds = new Set<string>();
 const publicNodeIds = new Set<string>();
 function collectPublicStats(nodes: GroupNode[]) {
@@ -223,7 +324,7 @@ function collectPublicStats(nodes: GroupNode[]) {
 		collectPublicStats(node.children);
 	}
 }
-collectPublicStats(publicSections);
+collectPublicStats(storefrontSections);
 const totalProducts = publicProductIds.size || products.length;
 const totalGroups = publicNodeIds.size || groups.length;
 const inStockProducts = products.filter(
@@ -1117,7 +1218,7 @@ const catalogStats = [
 							{
 								showTree ? (
 									<>
-										{publicSections.map((node) => (
+										{storefrontSections.map((node) => (
 											<CatalogSection node={node} level={0} />
 										))}
 									</>
