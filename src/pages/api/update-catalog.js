@@ -91,7 +91,7 @@ export async function POST({ request }) {
                 });
             }
 
-            const gid = product.ИдГруппы?.[0] || null;
+            const gid = extractProductGroupId(product);
 
             return {
                 id: product.Ид?.[0],
@@ -156,6 +156,15 @@ async function parseXMLString(xmlString) {
 function asArray(x) {
     if (x == null) return [];
     return Array.isArray(x) ? x : [x];
+}
+
+function extractProductGroupId(product) {
+    return (
+        product.ИдГруппы?.[0] ||
+        product.Группы?.[0]?.Ид?.[0] ||
+        product.Группы?.[0]?.Группа?.[0]?.Ид?.[0] ||
+        null
+    );
 }
 
 function flattenCommerceGroups(nodes, parentId, groupMap) {

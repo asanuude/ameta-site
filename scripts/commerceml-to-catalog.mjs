@@ -42,6 +42,15 @@ function asArray(x) {
     return Array.isArray(x) ? x : [x];
 }
 
+function extractProductGroupId(product) {
+    return (
+        product.ИдГруппы?.[0] ||
+        product.Группы?.[0]?.Ид?.[0] ||
+        product.Группы?.[0]?.Группа?.[0]?.Ид?.[0] ||
+        null
+    );
+}
+
 function flattenCommerceGroups(nodes, parentId, groupMap) {
     for (const node of asArray(nodes)) {
         const id = node.Ид?.[0];
@@ -113,7 +122,7 @@ async function main() {
             });
         }
 
-        const gid = product.ИдГруппы?.[0] || null;
+        const gid = extractProductGroupId(product);
 
         return {
             id: product.Ид?.[0],
