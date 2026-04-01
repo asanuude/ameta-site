@@ -26,7 +26,6 @@ interface GroupNode {
 	name: string;
 	products: Product[];
 	children: GroupNode[];
-	/** Позиции в этом узле и во всех вложенных папках */
 	branchProductCount: number;
 }
 
@@ -48,12 +47,27 @@ try {
 	/* нет файла — пустой каталог */
 }
 
+function compareNames(a: string, b: string): number {
+	return a.localeCompare(b, 'ru', { sensitivity: 'base' });
+}
+
+function compareProducts(a: Product, b: Product): number {
+	return compareNames(String(a.name || ''), String(b.name || ''));
+}
+
+function compareGroups(a: GroupNode, b: GroupNode): number {
+	if (b.branchProductCount !== a.branchProductCount) {
+		return b.branchProductCount - a.branchProductCount;
+	}
+	return compareNames(a.name, b.name);
+}
+
 function buildTree(parentId: string | null | undefined): GroupNode[] {
 	return groups
 		.filter((g) => (g.parentId ?? null) === (parentId ?? null))
 		.map((g) => {
-			const children = buildTree(g.id);
-			const ownProducts = products.filter((p) => p.groupId === g.id);
+			const children = buildTree(g.id).sort(compareGroups);
+			const ownProducts = products.filter((p) => p.groupId === g.id).sort(compareProducts);
 			const inChildren = children.reduce((sum, ch) => sum + ch.branchProductCount, 0);
 			return {
 				id: g.id,
@@ -62,14 +76,26 @@ function buildTree(parentId: string | null | undefined): GroupNode[] {
 				children,
 				branchProductCount: ownProducts.length + inChildren,
 			};
-		});
+		})
+		.sort(compareGroups);
 }
 
 const groupIds = new Set(groups.map((g) => g.id));
-const orphans = products.filter((p) => !p.groupId || !groupIds.has(p.groupId));
+const orphans = products
+	.filter((p) => !p.groupId || !groupIds.has(p.groupId))
+	.sort(compareProducts);
 
 const tree = buildTree(null);
 const showTree = groups.length > 0;
+const rootCategories = tree.slice(0, 12);
+const totalProducts = products.length;
+const totalGroups = groups.length;
+const inStockProducts = products.filter((p) => stockAvailabilityBand(p.quantity) !== 'order').length;
+const catalogStats = [
+	{ value: totalProducts.toLocaleString('ru-RU'), label: 'товаров в каталоге' },
+	{ value: totalGroups.toLocaleString('ru-RU'), label: 'разделов и подпапок' },
+	{ value: inStockProducts.toLocaleString('ru-RU'), label: 'позиций с остатком' },
+];
 ---
 
 <!doctype html>
@@ -79,297 +105,940 @@ const showTree = groups.length > 0;
 		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 		<title>Каталог — AMETA</title>
 		<style>
+			:root {
+				color-scheme: light;
+				--bg: #eff4fb;
+				--panel: #ffffff;
+				--panel-soft: #f8fbff;
+				--text: #10233f;
+				--muted: #62738d;
+				--line: #dbe4f0;
+				--line-strong: #c3d1e6;
+				--brand: #174ea6;
+				--brand-2: #3d73df;
+				--shadow: 0 18px 48px rgba(16, 35, 63, 0.12);
+			}
+
 			* {
 				box-sizing: border-box;
 				margin: 0;
 				padding: 0;
 			}
+
+			html {
+				scroll-behavior: smooth;
+			}
+
 			body {
 				font-family:
 					-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-				background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+				background:
+					radial-gradient(circle at top left, rgba(61, 115, 223, 0.12), transparent 28%),
+					linear-gradient(180deg, #f6f9fd 0%, var(--bg) 100%);
 				min-height: 100vh;
-				color: #1a1a1a;
-				padding: 1rem;
+				color: var(--text);
+				padding: 24px 16px 48px;
 			}
+
+			a {
+				color: inherit;
+			}
+
 			.wrap {
-				max-width: 960px;
+				max-width: 1320px;
 				margin: 0 auto;
 			}
-			.top {
+
+			.hero {
+				display: grid;
+				grid-template-columns: minmax(0, 1.55fr) minmax(300px, 0.95fr);
+				gap: 18px;
+				margin-bottom: 20px;
+			}
+
+			.hero-card,
+			.hero-side,
+			.toolbar,
+			.quick-nav,
+			.panel {
+				background: var(--panel);
+				border: 1px solid rgba(195, 209, 230, 0.9);
+				border-radius: 24px;
+				box-shadow: var(--shadow);
+			}
+
+			.hero-card {
+				padding: 28px;
+				background:
+					linear-gradient(135deg, rgba(23, 78, 166, 0.98) 0%, rgba(61, 115, 223, 0.94) 100%);
+				color: #fff;
+				border: none;
+			}
+
+			.breadcrumbs {
 				display: flex;
 				flex-wrap: wrap;
-				align-items: center;
-				justify-content: space-between;
-				gap: 1rem;
-				margin-bottom: 1.5rem;
+				gap: 8px;
+				font-size: 13px;
+				font-weight: 700;
+				letter-spacing: 0.05em;
+				text-transform: uppercase;
+				opacity: 0.8;
+				margin-bottom: 14px;
 			}
-			.top h1 {
-				color: #fff;
-				font-size: 1.75rem;
-				font-weight: 800;
-				letter-spacing: -0.02em;
+
+			.hero-title {
+				font-size: clamp(34px, 5vw, 54px);
+				line-height: 1.02;
+				letter-spacing: -0.04em;
+				font-weight: 900;
+				max-width: 10ch;
+				margin-bottom: 14px;
 			}
-			.top .hint {
-				color: rgba(255, 255, 255, 0.75);
-				font-size: 0.9rem;
-				max-width: 420px;
+
+			.hero-text {
+				max-width: 56ch;
+				font-size: 16px;
+				line-height: 1.65;
+				color: rgba(255, 255, 255, 0.92);
+				margin-bottom: 22px;
 			}
-			.nav {
+
+			.hero-actions {
 				display: flex;
-				gap: 0.75rem;
+				flex-wrap: wrap;
+				gap: 12px;
 			}
-			.nav a {
-				color: #fff;
-				text-decoration: none;
-				padding: 0.5rem 1rem;
+
+			.hero-btn {
+				display: inline-flex;
+				align-items: center;
+				justify-content: center;
+				min-height: 48px;
+				padding: 0 18px;
 				border-radius: 999px;
-				background: rgba(255, 255, 255, 0.12);
-				font-weight: 600;
-				font-size: 0.9rem;
+				text-decoration: none;
+				font-weight: 800;
+				font-size: 14px;
+				transition:
+					transform 0.12s ease,
+					filter 0.12s ease,
+					background-color 0.12s ease;
 			}
-			.nav a:hover {
-				background: rgba(255, 255, 255, 0.22);
+
+			.hero-btn:hover {
+				transform: translateY(-1px);
+				filter: brightness(1.03);
 			}
-			.panel {
+
+			.hero-btn--light {
 				background: #fff;
-				border-radius: 20px;
-				padding: 1.5rem;
-				box-shadow: 0 16px 48px rgba(0, 0, 0, 0.35);
+				color: var(--brand);
 			}
+
+			.hero-btn--ghost {
+				background: rgba(255, 255, 255, 0.12);
+				color: #fff;
+				border: 1px solid rgba(255, 255, 255, 0.18);
+			}
+
+			.hero-side {
+				padding: 24px;
+				display: flex;
+				flex-direction: column;
+				gap: 14px;
+			}
+
+			.hero-side-title {
+				font-size: 13px;
+				font-weight: 900;
+				text-transform: uppercase;
+				letter-spacing: 0.08em;
+				color: var(--brand);
+			}
+
+			.hero-side-grid {
+				display: grid;
+				grid-template-columns: repeat(2, minmax(0, 1fr));
+				gap: 12px;
+			}
+
+			.stat-card {
+				background: var(--panel-soft);
+				border: 1px solid var(--line);
+				border-radius: 18px;
+				padding: 16px;
+			}
+
+			.stat-value {
+				font-size: clamp(24px, 4vw, 34px);
+				line-height: 1;
+				font-weight: 900;
+				letter-spacing: -0.04em;
+				color: var(--text);
+				margin-bottom: 8px;
+			}
+
+			.stat-label {
+				font-size: 13px;
+				line-height: 1.45;
+				color: var(--muted);
+			}
+
+			.hero-notes {
+				display: grid;
+				gap: 10px;
+			}
+
+			.hero-note {
+				background: linear-gradient(180deg, #fff 0%, #f8fbff 100%);
+				border: 1px solid var(--line);
+				border-radius: 16px;
+				padding: 14px 15px;
+				font-size: 14px;
+				line-height: 1.5;
+				color: var(--muted);
+			}
+
+			.hero-note strong {
+				display: block;
+				color: var(--text);
+				font-size: 14px;
+				margin-bottom: 3px;
+			}
+
+			.toolbar {
+				position: sticky;
+				top: 14px;
+				z-index: 10;
+				padding: 16px 18px;
+				display: grid;
+				grid-template-columns: minmax(280px, 1.2fr) auto;
+				gap: 14px;
+				margin-bottom: 18px;
+			}
+
+			.search-wrap {
+				position: relative;
+			}
+
+			.search-input {
+				width: 100%;
+				min-height: 52px;
+				border-radius: 16px;
+				border: 1px solid var(--line-strong);
+				background: #f7faff;
+				padding: 0 54px 0 16px;
+				font: inherit;
+				font-size: 15px;
+				color: var(--text);
+				outline: none;
+			}
+
+			.search-input:focus {
+				border-color: #8bb0f4;
+				box-shadow: 0 0 0 4px rgba(61, 115, 223, 0.12);
+			}
+
+			.search-icon {
+				position: absolute;
+				right: 16px;
+				top: 50%;
+				transform: translateY(-50%);
+				font-size: 18px;
+				color: var(--brand);
+				pointer-events: none;
+			}
+
+			.toolbar-text {
+				display: flex;
+				align-items: center;
+				justify-content: flex-end;
+				gap: 10px;
+				text-align: right;
+				font-size: 14px;
+				line-height: 1.5;
+				color: var(--muted);
+			}
+
+			.toolbar-text strong {
+				color: var(--text);
+			}
+
+			.quick-nav {
+				padding: 22px;
+				margin-bottom: 18px;
+			}
+
+			.quick-nav-head {
+				display: flex;
+				flex-wrap: wrap;
+				align-items: end;
+				justify-content: space-between;
+				gap: 12px;
+				margin-bottom: 16px;
+			}
+
+			.section-kicker {
+				font-size: 12px;
+				font-weight: 900;
+				letter-spacing: 0.08em;
+				text-transform: uppercase;
+				color: var(--brand);
+				margin-bottom: 6px;
+			}
+
+			.section-title {
+				font-size: clamp(24px, 3vw, 32px);
+				line-height: 1.1;
+				letter-spacing: -0.03em;
+				font-weight: 900;
+				color: var(--text);
+			}
+
+			.section-text {
+				font-size: 15px;
+				line-height: 1.6;
+				color: var(--muted);
+				max-width: 72ch;
+			}
+
+			.root-grid {
+				display: grid;
+				grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+				gap: 14px;
+			}
+
+			.root-card {
+				display: flex;
+				flex-direction: column;
+				gap: 10px;
+				min-height: 168px;
+				padding: 18px;
+				border-radius: 20px;
+				border: 1px solid var(--line);
+				background: linear-gradient(180deg, #fff 0%, #f8fbff 100%);
+				text-decoration: none;
+				transition:
+					transform 0.12s ease,
+					box-shadow 0.12s ease,
+					border-color 0.12s ease;
+			}
+
+			.root-card:hover {
+				transform: translateY(-2px);
+				border-color: #8bb0f4;
+				box-shadow: 0 10px 26px rgba(23, 78, 166, 0.12);
+			}
+
+			.root-card-icon {
+				width: 42px;
+				height: 42px;
+				display: inline-flex;
+				align-items: center;
+				justify-content: center;
+				border-radius: 14px;
+				background: rgba(23, 78, 166, 0.08);
+				color: var(--brand);
+				font-size: 20px;
+			}
+
+			.root-card-title {
+				font-size: 18px;
+				font-weight: 800;
+				line-height: 1.25;
+				color: var(--text);
+			}
+
+			.root-card-meta {
+				font-size: 13px;
+				line-height: 1.5;
+				color: var(--muted);
+			}
+
+			.root-card-tags {
+				display: flex;
+				flex-wrap: wrap;
+				gap: 8px;
+			}
+
+			.root-card-tags span {
+				display: inline-flex;
+				align-items: center;
+				padding: 6px 10px;
+				border-radius: 999px;
+				background: #eef4ff;
+				color: var(--brand);
+				font-size: 12px;
+				font-weight: 700;
+			}
+
+			.panel {
+				padding: 24px;
+			}
+
+			.catalog-empty {
+				padding: 36px;
+				border-radius: 20px;
+				background: #f8fbff;
+				border: 1px dashed var(--line-strong);
+				color: var(--muted);
+				text-align: center;
+				font-size: 16px;
+				line-height: 1.6;
+			}
+
+			.catalog-results-empty {
+				display: none;
+				margin-top: 18px;
+				padding: 22px;
+				border-radius: 18px;
+				border: 1px dashed var(--line-strong);
+				background: #f8fbff;
+				color: var(--muted);
+				text-align: center;
+				font-size: 15px;
+				line-height: 1.6;
+			}
+
+			.catalog-results-empty.is-visible {
+				display: block;
+			}
+
 			.folder-block {
 				margin-bottom: 0;
 			}
+
 			.folder-nested {
-				margin-top: 1.25rem;
-				margin-left: 0;
-				padding-left: 1.15rem;
-				border-left: 3px solid #c7d2fe;
+				margin-top: 18px;
+				padding-left: 18px;
+				border-left: 2px solid #d8e2f0;
 			}
+
 			.catalog-folder {
-				scroll-margin-top: 1rem;
-				margin-bottom: 2rem;
+				scroll-margin-top: 96px;
+				margin-bottom: 24px;
 			}
+
+			.catalog-folder--root {
+				margin-bottom: 34px;
+				padding-bottom: 4px;
+				border-bottom: 1px solid #edf2f8;
+			}
+
 			.catalog-folder-head {
 				display: flex;
 				align-items: flex-start;
-				gap: 0.85rem;
-				padding: 1rem 1.15rem;
-				margin-bottom: 1rem;
-				background: linear-gradient(120deg, #f8fafc 0%, #eef2ff 100%);
-				border-radius: 16px;
-				border: 1px solid #e2e8f0;
+				gap: 14px;
+				padding: 20px;
+				margin-bottom: 16px;
+				border-radius: 22px;
+				background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+				border: 1px solid var(--line);
 			}
+
 			.catalog-folder-icon {
-				font-size: 1.75rem;
+				width: 50px;
+				height: 50px;
+				display: inline-flex;
+				align-items: center;
+				justify-content: center;
+				border-radius: 18px;
+				background: rgba(23, 78, 166, 0.08);
+				font-size: 24px;
 				line-height: 1;
-				filter: drop-shadow(0 2px 4px rgba(15, 52, 96, 0.12));
+				flex-shrink: 0;
 			}
+
 			.catalog-folder-titles {
 				flex: 1;
 				min-width: 0;
 			}
-			.folder-title {
-				font-size: 1.25rem;
-				margin: 0 0 0.35rem;
-				color: #0f3460;
-				font-weight: 800;
-				letter-spacing: -0.02em;
-				line-height: 1.25;
-			}
-			.catalog-folder-meta {
-				margin: 0;
-				font-size: 0.88rem;
-				color: #64748b;
-				font-weight: 500;
-			}
-			.subfolder-nav {
-				margin-bottom: 1.25rem;
-			}
-			.subfolder-nav-title {
-				font-size: 0.72rem;
+
+			.catalog-folder-kicker {
+				font-size: 12px;
 				font-weight: 800;
 				text-transform: uppercase;
-				letter-spacing: 0.07em;
-				color: #64748b;
-				margin-bottom: 0.65rem;
+				letter-spacing: 0.08em;
+				color: var(--brand);
+				margin-bottom: 6px;
 			}
+
+			.folder-title {
+				font-size: clamp(22px, 3vw, 30px);
+				line-height: 1.15;
+				letter-spacing: -0.03em;
+				font-weight: 900;
+				color: var(--text);
+				margin-bottom: 8px;
+			}
+
+			.catalog-folder-meta {
+				font-size: 14px;
+				line-height: 1.55;
+				color: var(--muted);
+			}
+
+			.subfolder-nav {
+				margin-bottom: 16px;
+			}
+
+			.subfolder-nav-title {
+				font-size: 12px;
+				font-weight: 900;
+				text-transform: uppercase;
+				letter-spacing: 0.08em;
+				color: #5e6f8f;
+				margin-bottom: 10px;
+			}
+
 			.subfolder-grid {
 				display: grid;
-				grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-				gap: 0.75rem;
+				grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+				gap: 12px;
 			}
+
 			.subfolder-card {
 				display: flex;
 				flex-direction: column;
 				align-items: flex-start;
-				gap: 0.25rem;
-				padding: 0.85rem 1rem;
-				background: #fff;
-				border: 1px solid #e2e8f0;
-				border-radius: 14px;
+				gap: 6px;
+				padding: 16px;
+				background: #f8fbff;
+				border: 1px solid var(--line);
+				border-radius: 18px;
 				text-decoration: none;
 				color: inherit;
 				transition:
-					border-color 0.15s ease,
-					box-shadow 0.15s ease,
+					border-color 0.12s ease,
+					box-shadow 0.12s ease,
 					transform 0.12s ease;
-				box-shadow: 0 2px 8px rgba(15, 52, 96, 0.06);
 			}
+
 			.subfolder-card:hover {
-				border-color: #818cf8;
-				box-shadow: 0 6px 20px rgba(67, 56, 202, 0.12);
+				border-color: #8bb0f4;
+				box-shadow: 0 10px 24px rgba(23, 78, 166, 0.1);
 				transform: translateY(-1px);
 			}
+
 			.subfolder-card-icon {
-				font-size: 1.35rem;
-				line-height: 1;
+				font-size: 18px;
 			}
+
 			.subfolder-card-name {
-				font-weight: 700;
-				font-size: 0.95rem;
-				color: #0f3460;
+				font-size: 16px;
+				font-weight: 800;
 				line-height: 1.3;
+				color: var(--text);
 			}
-			.subfolder-card-hint {
-				font-size: 0.75rem;
-				font-weight: 600;
-				color: #6366f1;
-			}
+
 			.subfolder-card-count {
-				font-size: 0.78rem;
-				color: #94a3b8;
-				font-weight: 500;
+				font-size: 13px;
+				color: var(--muted);
 			}
+
+			.subfolder-card-hint {
+				font-size: 12px;
+				font-weight: 800;
+				color: var(--brand);
+			}
+
 			.product-list {
 				list-style: none;
+			}
+
+			.product-grid {
+				display: grid;
+				grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+				gap: 14px;
+			}
+
+			.product-card {
 				display: flex;
 				flex-direction: column;
-				gap: 0.75rem;
+				gap: 14px;
+				min-height: 220px;
+				padding: 18px;
+				border: 1px solid var(--line);
+				border-radius: 22px;
+				background: linear-gradient(180deg, #fff 0%, #f8fbff 100%);
+				box-shadow: 0 10px 24px rgba(16, 35, 63, 0.06);
 			}
-			.product-card {
-				background: #f4f6fb;
-				border-radius: 12px;
-				padding: 1rem 1.1rem;
-				border: 1px solid #e2e8f0;
+
+			.product-card-top {
+				display: flex;
+				align-items: flex-start;
+				gap: 12px;
 			}
+
+			.product-card-media {
+				width: 48px;
+				height: 48px;
+				display: inline-flex;
+				align-items: center;
+				justify-content: center;
+				border-radius: 16px;
+				background: rgba(23, 78, 166, 0.08);
+				font-size: 22px;
+				flex-shrink: 0;
+			}
+
+			.product-card-main {
+				min-width: 0;
+			}
+
 			.product-name {
-				font-weight: 700;
-				font-size: 1.05rem;
-				margin-bottom: 0.25rem;
+				font-size: 17px;
+				line-height: 1.35;
+				font-weight: 800;
+				color: var(--text);
+				margin-bottom: 6px;
 			}
+
 			.product-sku {
-				font-size: 0.8rem;
-				color: #64748b;
-				margin-bottom: 0.35rem;
+				font-size: 12px;
+				font-weight: 700;
+				letter-spacing: 0.04em;
+				text-transform: uppercase;
+				color: #6f7f98;
 			}
+
 			.product-desc {
-				font-size: 0.9rem;
-				color: #475569;
-				line-height: 1.45;
-				margin-bottom: 0.5rem;
+				font-size: 14px;
+				line-height: 1.55;
+				color: var(--muted);
+				display: -webkit-box;
+				-webkit-line-clamp: 3;
+				line-clamp: 3;
+				-webkit-box-orient: vertical;
+				overflow: hidden;
 			}
+
 			.product-meta {
 				display: flex;
 				flex-wrap: wrap;
-				gap: 1rem;
-				font-size: 0.9rem;
+				align-items: center;
+				gap: 10px 14px;
+				margin-top: auto;
 			}
+
 			.price {
-				font-weight: 800;
-				color: #0f3460;
+				font-size: 22px;
+				line-height: 1;
+				font-weight: 900;
+				letter-spacing: -0.03em;
+				color: var(--text);
 			}
+
 			.availability-badge {
 				display: inline-flex;
 				align-items: center;
-				padding: 0.2rem 0.65rem;
+				justify-content: center;
+				min-height: 32px;
+				padding: 0 12px;
 				border-radius: 999px;
-				font-size: 0.78rem;
-				font-weight: 700;
-				letter-spacing: 0.02em;
+				font-size: 12px;
+				font-weight: 900;
+				letter-spacing: 0.04em;
+				text-transform: uppercase;
 			}
+
 			.availability-badge--order {
 				background: #fee2e2;
-				color: #991b1b;
+				color: #9d174d;
 			}
+
 			.availability-badge--low {
 				background: #ffedd5;
 				color: #9a3412;
 			}
+
 			.availability-badge--medium {
 				background: #dbeafe;
-				color: #1e40af;
+				color: #1d4ed8;
 			}
+
 			.availability-badge--plenty {
 				background: #d1fae5;
-				color: #065f46;
+				color: #047857;
 			}
-			.catalog-tree-intro {
-				margin-bottom: 1.75rem;
-				padding: 1.1rem 1.25rem;
-				background: linear-gradient(135deg, #f0f4ff 0%, #e8f4fc 100%);
-				border-radius: 16px;
-				border: 1px solid #c7d2fe;
+
+			.product-card-footer {
+				display: flex;
+				align-items: center;
+				justify-content: space-between;
+				gap: 12px;
+				padding-top: 12px;
+				border-top: 1px solid #edf2f8;
 			}
-			.catalog-tree-intro-lead {
-				font-size: 0.72rem;
+
+			.product-foot-note {
+				font-size: 12px;
+				line-height: 1.45;
+				color: var(--muted);
+			}
+
+			.product-link {
+				font-size: 13px;
 				font-weight: 800;
-				text-transform: uppercase;
-				letter-spacing: 0.08em;
-				color: #4338ca;
-				margin-bottom: 0.35rem;
+				color: var(--brand);
+				text-decoration: none;
+				white-space: nowrap;
 			}
-			.catalog-tree-intro-text {
-				font-size: 0.95rem;
-				color: #334155;
-				line-height: 1.5;
-				margin: 0;
+
+			.product-link:hover {
+				text-decoration: underline;
 			}
-			.empty {
-				text-align: center;
-				padding: 2rem;
-				color: #64748b;
+
+			.orphan-head {
+				padding: 20px;
+				margin-bottom: 16px;
+				border: 1px dashed var(--line-strong);
+				border-radius: 20px;
+				background: #fbfdff;
+			}
+
+			.orphan-head .folder-title {
+				margin-bottom: 6px;
+			}
+
+			.is-hidden {
+				display: none !important;
+			}
+
+			@media (max-width: 1024px) {
+				.hero {
+					grid-template-columns: 1fr;
+				}
+
+				.toolbar {
+					grid-template-columns: 1fr;
+				}
+
+				.toolbar-text {
+					justify-content: flex-start;
+					text-align: left;
+				}
+			}
+
+			@media (max-width: 720px) {
+				body {
+					padding: 14px 12px 32px;
+				}
+
+				.hero-card,
+				.hero-side,
+				.toolbar,
+				.quick-nav,
+				.panel {
+					border-radius: 20px;
+				}
+
+				.hero-card,
+				.hero-side,
+				.panel {
+					padding: 18px;
+				}
+
+				.toolbar {
+					padding: 14px;
+					position: static;
+				}
+
+				.hero-side-grid,
+				.product-grid,
+				.subfolder-grid,
+				.root-grid {
+					grid-template-columns: 1fr;
+				}
+
+				.product-card-footer {
+					flex-direction: column;
+					align-items: flex-start;
+				}
 			}
 		</style>
 	</head>
 	<body>
 		<div class="wrap">
-			<div class="top">
-				<div>
-					<h1>Каталог</h1>
-					<p class="hint">
-						Справочник групп как в 1С: удобный просмотр по папкам. Наличие показано шкалой (без точного
-						остатка). Обновление каталога — POST <code>/api/update-catalog</code> (import*.xml).
+			<section class="hero">
+				<div class="hero-card">
+					<div class="breadcrumbs">
+						<span>AMETA</span>
+						<span>/</span>
+						<span>Каталог оборудования</span>
+					</div>
+					<h1 class="hero-title">Оборудование для магазина, кафе и ресторана</h1>
+					<p class="hero-text">
+						В лучших B2B-каталогах главное видно сразу: крупные разделы, быстрый поиск, понятные карточки
+						и наличие без лишнего шума. Здесь тот же подход, но на ваших данных из 1С.
 					</p>
+					<div class="hero-actions">
+						<a class="hero-btn hero-btn--light" href="#catalog-sections">Смотреть разделы</a>
+						<a class="hero-btn hero-btn--ghost" href="/">Подобрать с консультантом</a>
+					</div>
 				</div>
-				<nav class="nav">
-					<a href="/">Консультант</a>
-				</nav>
+
+				<aside class="hero-side">
+					<div>
+						<p class="hero-side-title">Каталог в цифрах</p>
+						<div class="hero-side-grid">
+							{
+								catalogStats.map((item) => (
+									<div class="stat-card">
+										<div class="stat-value">{item.value}</div>
+										<div class="stat-label">{item.label}</div>
+									</div>
+								))
+							}
+						</div>
+					</div>
+					<div class="hero-notes">
+						<div class="hero-note">
+							<strong>Как у ведущих B2B-магазинов</strong>
+							Быстрые категории сверху, карточки товаров сеткой и навигация по разделам без бесконечных списков.
+						</div>
+						<div class="hero-note">
+							<strong>Наличие без цифр</strong>
+							Используем коммерчески понятную шкалу: под заказ, мало, много, не иссякаемо.
+						</div>
+					</div>
+				</aside>
+			</section>
+
+			<div class="toolbar">
+				<div class="search-wrap">
+					<input
+						class="search-input"
+						type="search"
+						placeholder="Поиск по названию, артикулу, описанию или разделу"
+						data-catalog-search
+					/>
+					<span class="search-icon" aria-hidden="true">⌕</span>
+				</div>
+				<div class="toolbar-text">
+					<strong>Подсказка:</strong>
+					ищите по названию товара, артикулу или разделу, как это делают каталоги WebstaurantStore и OZBERG.
+				</div>
 			</div>
-			<div class="panel">
-				{
-					products.length === 0 ? (
-						<p class="empty">Каталог пуст. Загрузите выгрузку 1С или заполните public/catalog.json.</p>
-					) : showTree ? (
-						<>
-							<div class="catalog-tree-intro">
-								<p class="catalog-tree-intro-lead">Навигация по разделам</p>
-								<p class="catalog-tree-intro-text">
-									Выберите подраздел ниже — страница прокрутится к нужной папке. В каждой карточке
-									товара указана доступность: под заказ, мало, много или не иссякаемо.
+
+			{
+				products.length === 0 ? (
+					<div class="catalog-empty">
+						Каталог пуст. Загрузите выгрузку 1С или заполните <code>public/catalog.json</code>.
+					</div>
+				) : (
+					<>
+						{showTree && (
+							<section class="quick-nav">
+								<div class="quick-nav-head">
+									<div>
+										<p class="section-kicker">Популярные разделы</p>
+										<h2 class="section-title">Быстрый вход в ключевые категории</h2>
+									</div>
+									<p class="section-text">
+										Такой блок есть почти у всех сильных поставщиков: покупатель сначала выбирает
+										тип оборудования, а уже потом спускается в товары.
+									</p>
+								</div>
+								<div class="root-grid">
+									{rootCategories.map((node) => (
+										<a
+											class="root-card"
+											href={`#cat-folder-${node.id}`}
+											data-root-card-for={node.id}
+										>
+											<span class="root-card-icon" aria-hidden="true">🏷️</span>
+											<div class="root-card-title">{node.name}</div>
+											<div class="root-card-meta">
+												{node.branchProductCount.toLocaleString('ru-RU')} позиций в разделе
+											</div>
+											<div class="root-card-tags">
+												{node.children.slice(0, 3).map((child) => <span>{child.name}</span>)}
+											</div>
+										</a>
+									))}
+								</div>
+							</section>
+						)}
+
+						<section class="panel" id="catalog-sections">
+							<div class="quick-nav-head">
+								<div>
+									<p class="section-kicker">Структура каталога</p>
+									<h2 class="section-title">Разделы и товары</h2>
+								</div>
+								<p class="section-text">
+									Страница оформлена по логике ведущих сайтов: сначала обзор категорий, затем
+									полноценные секции с подпапками и карточками товаров в сетке.
 								</p>
 							</div>
-							{tree.map((node) => (
-								<CatalogSection node={node} />
-							))}
-							{orphans.length > 0 && (
-								<div class="folder-block">
-									<h2 class="folder-title">Без группы / прочее</h2>
-									<ul class="product-list">
-										{orphans.map((p) => (
-											<li class="product-card">
-												<div class="product-name">{p.name}</div>
-												{p.sku && <div class="product-sku">Код: {p.sku}</div>}
+
+							{
+								showTree ? (
+									<>
+										{tree.map((node) => (
+											<CatalogSection node={node} level={0} />
+										))}
+										{orphans.length > 0 && (
+											<section class="catalog-folder folder-block" data-folder-search="прочее без группы">
+												<div class="orphan-head">
+													<h2 class="folder-title">Без группы / прочее</h2>
+													<p class="catalog-folder-meta">
+														Товары без привязки к разделам. Их тоже можно искать и открывать из
+														каталога.
+													</p>
+												</div>
+												<ul class="product-list product-grid">
+													{orphans.map((p) => (
+														<li
+															class="product-card"
+															data-product-search={`${p.name || ''} ${p.sku || ''} ${p.description || ''}`.toLowerCase()}
+														>
+															<div class="product-card-top">
+																<div class="product-card-media" aria-hidden="true">📦</div>
+																<div class="product-card-main">
+																	<div class="product-name">{p.name}</div>
+																	{p.sku && <div class="product-sku">Артикул: {p.sku}</div>}
+																</div>
+															</div>
+															{p.description && <p class="product-desc">{p.description}</p>}
+															<div class="product-meta">
+																<span class="price">
+																	{typeof p.price === 'number'
+																		? `${p.price.toLocaleString('ru-RU')} ₽`
+																		: p.price}
+																</span>
+																<span
+																	class={`availability-badge availability-badge--${stockAvailabilityBand(p.quantity)}`}
+																>
+																	{stockAvailabilityLabel(p.quantity)}
+																</span>
+															</div>
+															<div class="product-card-footer">
+																<span class="product-foot-note">Без группы</span>
+																<a class="product-link" href="/">Уточнить у консультанта</a>
+															</div>
+														</li>
+													))}
+												</ul>
+											</section>
+										)}
+									</>
+								) : (
+									<ul class="product-list product-grid">
+										{products.map((p) => (
+											<li
+												class="product-card"
+												data-product-search={`${p.name || ''} ${p.sku || ''} ${p.description || ''}`.toLowerCase()}
+											>
+												<div class="product-card-top">
+													<div class="product-card-media" aria-hidden="true">📦</div>
+													<div class="product-card-main">
+														<div class="product-name">{p.name}</div>
+														{p.sku && <div class="product-sku">Артикул: {p.sku}</div>}
+													</div>
+												</div>
 												{p.description && <p class="product-desc">{p.description}</p>}
 												<div class="product-meta">
 													<span class="price">
@@ -383,41 +1052,87 @@ const showTree = groups.length > 0;
 														{stockAvailabilityLabel(p.quantity)}
 													</span>
 												</div>
+												<div class="product-card-footer">
+													<span class="product-foot-note">Общий каталог</span>
+													<a class="product-link" href="/">Уточнить у консультанта</a>
+												</div>
 											</li>
 										))}
 									</ul>
-								</div>
-							)}
-						</>
-					) : (
-						<div class="folder-block">
-							<h2 class="folder-title">Все товары</h2>
-							<ul class="product-list">
-								{products.map((p) => (
-									<li class="product-card">
-										<div class="product-name">{p.name}</div>
-										{p.sku && <div class="product-sku">Код: {p.sku}</div>}
-										{p.description && <p class="product-desc">{p.description}</p>}
-										<div class="product-meta">
-											<span class="price">
-												{typeof p.price === 'number'
-													? `${p.price.toLocaleString('ru-RU')} ₽`
-													: p.price}
-											</span>
-											<span
-												class={`availability-badge availability-badge--${stockAvailabilityBand(p.quantity)}`}
-											>
-												{stockAvailabilityLabel(p.quantity)}
-											</span>
-										</div>
-									</li>
-								))}
-							</ul>
-						</div>
-					)
-				}
-			</div>
+								)
+							}
+
+							<div class="catalog-results-empty" data-catalog-empty>
+								Ничего не найдено. Попробуйте часть названия, артикул или более широкий раздел.
+							</div>
+						</section>
+					</>
+				)
+			}
 		</div>
+
+		<script>
+			document.addEventListener('DOMContentLoaded', function () {
+				const input = document.querySelector('[data-catalog-search]');
+				if (!input) return;
+
+				const products = Array.from(document.querySelectorAll('[data-product-search]'));
+				const folders = Array.from(document.querySelectorAll('[data-folder-id], .catalog-folder[data-folder-search]'));
+				const rootCards = Array.from(document.querySelectorAll('[data-root-card-for]'));
+				const empty = document.querySelector('[data-catalog-empty]');
+
+				function normalize(text) {
+					return String(text || '')
+						.toLowerCase()
+						.replace(/ё/g, 'е')
+						.replace(/[^a-zа-я0-9]+/gi, ' ')
+						.replace(/\s+/g, ' ')
+						.trim();
+				}
+
+				function applySearch() {
+					const query = normalize(input.value);
+
+					products.forEach(function (card) {
+						if (!query) {
+							card.classList.remove('is-hidden');
+							return;
+						}
+						const haystack = normalize(card.getAttribute('data-product-search'));
+						card.classList.toggle('is-hidden', !haystack.includes(query));
+					});
+
+					const reversedFolders = folders.slice().reverse();
+					reversedFolders.forEach(function (folder) {
+						if (!query) {
+							folder.classList.remove('is-hidden');
+							return;
+						}
+
+						const ownMatch = normalize(folder.getAttribute('data-folder-search')).includes(query);
+						const visibleProducts = folder.querySelector('[data-product-search]:not(.is-hidden)');
+						const visibleChildren = folder.querySelector('.folder-nested .catalog-folder:not(.is-hidden)');
+						folder.classList.toggle('is-hidden', !(ownMatch || visibleProducts || visibleChildren));
+					});
+
+					rootCards.forEach(function (card) {
+						const id = card.getAttribute('data-root-card-for');
+						const target = document.getElementById('cat-folder-' + id);
+						card.classList.toggle('is-hidden', !!(target && target.classList.contains('is-hidden')));
+					});
+
+					const hasVisible = products.some(function (card) {
+						return !card.classList.contains('is-hidden');
+					});
+					if (empty) {
+						empty.classList.toggle('is-visible', !hasVisible && query.length > 0);
+					}
+				}
+
+				input.addEventListener('input', applySearch);
+			});
+		</script>
+
 		<SpeedInsights />
 	</body>
 </html>

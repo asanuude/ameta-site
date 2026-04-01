@@ -20,7 +20,7 @@ interface GroupNode {
 	branchProductCount: number;
 }
 
-const { node } = Astro.props as { node: GroupNode };
+const { node, level = 0 } = Astro.props as { node: GroupNode; level?: number };
 
 const posPlural = new Intl.PluralRules('ru');
 function pluralPos(n: number): string {
@@ -41,12 +41,36 @@ if (node.children.length > 0 && node.products.length > 0) {
 } else if (node.products.length > 0) {
 	folderMeta = `${node.products.length} ${pluralPos(node.products.length)}`;
 }
+
+function normalizeSearchText(value: unknown): string {
+	return String(value || '')
+		.toLowerCase()
+		.replace(/ё/g, 'е')
+		.replace(/[^a-zа-я0-9]+/gi, ' ')
+		.replace(/\s+/g, ' ')
+		.trim();
+}
+
+const folderSearch = normalizeSearchText(
+	[
+		node.name,
+		folderMeta,
+		...node.children.map((child) => child.name),
+		...node.products.slice(0, 24).flatMap((product) => [product.name, product.sku, product.description]),
+	].join(' ')
+);
 ---
 
-<section class="catalog-folder folder-block" id={`cat-folder-${node.id}`}>
+<section
+	class={`catalog-folder folder-block ${level === 0 ? 'catalog-folder--root' : ''}`}
+	id={`cat-folder-${node.id}`}
+	data-folder-id={node.id}
+	data-folder-search={folderSearch}
+>
 	<header class="catalog-folder-head">
-		<span class="catalog-folder-icon" aria-hidden="true">📁</span>
+		<span class="catalog-folder-icon" aria-hidden="true">{level === 0 ? '🏷️' : '📁'}</span>
 		<div class="catalog-folder-titles">
+			<p class="catalog-folder-kicker">{level === 0 ? 'Основной раздел' : 'Подраздел'}</p>
 			<h2 class="folder-title">{node.name}</h2>
 			{folderMeta && <p class="catalog-folder-meta">{folderMeta}</p>}
 		</div>
@@ -78,11 +102,21 @@ if (node.children.length > 0 && node.products.length > 0) {
 
 	{
 		node.products.length > 0 && (
-			<ul class="product-list">
+			<ul class="product-list product-grid">
 				{node.products.map((p) => (
-					<li class="product-card">
-						<div class="product-name">{p.name}</div>
-						{p.sku && <div class="product-sku">Код: {p.sku}</div>}
+					<li
+						class="product-card"
+						data-product-search={normalizeSearchText(
+							[p.name, p.sku, p.description, node.name].join(' ')
+						)}
+					>
+						<div class="product-card-top">
+							<div class="product-card-media" aria-hidden="true">📦</div>
+							<div class="product-card-main">
+								<div class="product-name">{p.name}</div>
+								{p.sku && <div class="product-sku">Артикул: {p.sku}</div>}
+							</div>
+						</div>
 						{p.description && <p class="product-desc">{p.description}</p>}
 						<div class="product-meta">
 							<span class="price">
@@ -96,6 +130,10 @@ if (node.children.length > 0 && node.products.length > 0) {
 								{stockAvailabilityLabel(p.quantity)}
 							</span>
 						</div>
+						<div class="product-card-footer">
+							<span class="product-foot-note">{node.name}</span>
+							<a class="product-link" href="/">Уточнить у консультанта</a>
+						</div>
 					</li>
 				))}
 			</ul>
@@ -105,7 +143,7 @@ if (node.children.length > 0 && node.products.length > 0) {
 	{
 		node.children.map((child) => (
 			<div class="folder-nested">
-				<CatalogSection node={child} />
+				<CatalogSection node={child} level={level + 1} />
 			</div>
 		))
 	}
