@@ -746,7 +746,7 @@ export function getCatalogStorefront(): CatalogStorefrontResult {
 		sections,
 		stats: [
 			{ value: totalProducts.toLocaleString('ru-RU'), label: 'товаров на витрине' },
-			{ value: totalGroups.toLocaleString('ru-RU'), label: 'публичных разделов и подпапок' },
+			{ value: totalGroups.toLocaleString('ru-RU'), label: 'разделов и групп оборудования' },
 			{ value: inStockProducts.toLocaleString('ru-RU'), label: 'позиций с остатком' },
 		],
 	};

@@ -530,7 +530,7 @@ import SpeedInsights from "@vercel/speed-insights/astro";
             <div class="header-row">
                 <div>
                     <h1>AMETA</h1>
-                    <p>Подбор оборудования, ПО, внедрение и обслуживание</p>
+                    <p>Оборудование, программы и сопровождение для торговли, кухни и бизнеса</p>
                 </div>
                 <a class="catalog-link" href="/catalog">Каталог</a>
             </div>
@@ -538,7 +538,7 @@ import SpeedInsights from "@vercel/speed-insights/astro";
 
         <div class="messages" id="messages">
             <div class="message bot-message">
-                Здравствуйте. Помогу подобрать оборудование и программное обеспечение для магазина, кафе, ресторана или производства, а также сориентирую по установке, подключению и обслуживанию. Что вы планируете модернизировать?
+                Здравствуйте. Помогу подобрать кассовую технику, оборудование для кухни, программы и сопутствующие решения под ваш объект. Напишите, что именно вы открываете, обновляете или хотите автоматизировать.
             </div>
         </div>
 
@@ -547,7 +547,7 @@ import SpeedInsights from "@vercel/speed-insights/astro";
                 <input 
                     type="text" 
                     id="userInput" 
-                    placeholder="Напишите ваш вопрос..."
+                    placeholder="Например: нужна касса и сканер для магазина"
                     autocomplete="off"
                 >
                 <button class="mic-button" id="micButton">
@@ -585,10 +585,10 @@ import SpeedInsights from "@vercel/speed-insights/astro";
             }
 
             const WAIT_HINTS = [
-                'Подождите — запрос обрабатывается.',
-                'Система не зависла: идёт подбор ответа.',
-                'Иногда ответ занимает до 1–2 минут — это нормально.',
-                'При оформлении счёта связь с учётной системой может занять чуть больше времени.',
+                'Подбираю подходящие варианты под ваш запрос.',
+                'Сравниваю оборудование и сопутствующие позиции.',
+                'Если ответ чуть дольше обычного, значит идёт более детальный подбор.',
+                'Для счёта и наличия иногда нужно немного больше времени на проверку.',
             ];
 
             function escapeHtmlClient(s) {
@@ -633,7 +633,7 @@ import SpeedInsights from "@vercel/speed-insights/astro";
                     case 'medium':
                         return 'Много';
                     case 'plenty':
-                        return 'Не иссякаемо';
+                        return 'В наличии';
                     default:
                         return 'Под заказ';
                 }
