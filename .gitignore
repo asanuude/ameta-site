@@ -17,8 +17,12 @@ npm-debug.log*
 # OS files
 .DS_Store
 Thumbs.db
+
+# Vercel (локальный link)
 .vercel
-.env*.local
+
+# jetbrains setting folder
+.idea/
 
 # Локальный portable GitHub CLI (см. команды в ответе агента)
 tools/gh/
