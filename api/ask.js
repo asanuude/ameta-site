@@ -154,6 +154,7 @@ function normalizeCatalogToken(s) {
         .replace(/ё/g, 'е')
         .replace(/(\d)\s*x(?=\s|$|[^\wа-яё])/gi, '$1х')
         .replace(/[-–—_/]+/g, ' ')
+        .replace(/[()[\],.;:]+/g, ' ')
         .replace(/\s+/g, ' ')
         .trim();
 }
@@ -311,8 +312,40 @@ const CATALOG_QUERY_STOPWORDS = new Set(
 
 function catalogQueryTokens(qNorm) {
     return String(qNorm || '')
-        .split(' ')
+        .split(/[^a-zа-яё0-9]+/i)
+        .map((t) => t.trim().toLowerCase())
         .filter((t) => t.length >= 2 && !CATALOG_QUERY_STOPWORDS.has(t));
+}
+
+/** Совпадение токена с полем поиска (учёт В/мА и латиницы в номенклатуре). */
+function catalogTokenMatchesHaystack(token, h, n) {
+    if (!token) return false;
+    if (h.includes(token) || n.includes(token)) return true;
+    const v = token.match(/^(\d+)\s*v$/i);
+    if (v) {
+        const d = v[1];
+        if (
+            h.includes(`${d}в`) ||
+            h.includes(`${d} в`) ||
+            h.includes(`${d}v`) ||
+            n.includes(`${d}в`)
+        ) {
+            return true;
+        }
+    }
+    const ma = token.match(/^(\d+)\s*(ma|ма)$/i);
+    if (ma) {
+        const d = ma[1];
+        if (
+            h.includes(`${d}ма`) ||
+            h.includes(`${d} ма`) ||
+            h.includes(`${d}ma`) ||
+            h.includes(`${d}миллиампер`)
+        ) {
+            return true;
+        }
+    }
+    return false;
 }
 
 /**
@@ -327,13 +360,19 @@ function augmentCatalogQueryForSearch(qNorm) {
     s = s.replace(/принтер[а-яё]*/gi, 'принтер');
     s = s.replace(/ккм\b|касс[а-яё]*/gi, 'касс');
     s = s.replace(/мясоруб[а-яё]*/gi, 'мясоруб');
+    // БП / зарядка → общий якорь «адаптер» для матчинга с «блок питания», «сетевой адаптер» и т.п.
+    s = s.replace(/блок\s*пит(?:ания)?|бп\b|psu\b|power\s*supply/gi, 'адаптер');
+    s = s.replace(/заряд(?:н|ног|ное|ка)?|зарядк[а-яё]*/gi, 'адаптер');
+    // «24V, 3000mA» / «24в 3000ма» — в каталоге часто «24В» и «3000 мА» раздельно
+    s = s.replace(/(\d+)\s*v\b/gi, '$1в');
+    s = s.replace(/(\d+)\s*(ma|ма)\b/gi, '$1ма');
     return normalizeCatalogToken(s);
 }
 
 /** Узкая тематика (не «весь каталог») — не подмешивать первые N позиций алфавита */
 function looksLikeSpecificProductTopic(question) {
     const raw = String(question || '').toLowerCase();
-    return /холод|мороз|рефриж|скан|штрих|вес|принтер|касс|ккм|тсд|терминал|фиск|витрин|мясоруб|детектор|миксер|блендер|посудомо/i.test(
+    return /холод|мороз|рефриж|скан|штрих|вес|принтер|касс|ккм|тсд|терминал|фиск|витрин|мясоруб|детектор|миксер|блендер|посудомо|адапт|блок\s*пит|заряд|кабел|сетев|ма\b|mv\b|\d+\s*v\b/i.test(
         raw
     );
 }
@@ -397,10 +436,32 @@ function findAllCatalogMatches(rawQuery, inStockProducts) {
     if (hits.length === 0 && primary !== q) {
         hits = pool.filter(({ n, h }) => h.includes(q) || n.includes(q));
     }
-    if (hits.length === 0) {
-        const tokens = catalogQueryTokens(primary);
-        if (tokens.length === 0) return [];
-        hits = pool.filter(({ n, h }) => tokens.every((t) => h.includes(t) || n.includes(t)));
+    const tokensPrimary = catalogQueryTokens(primary);
+    if (hits.length === 0 && tokensPrimary.length > 0) {
+        hits = pool.filter(({ n, h }) =>
+            tokensPrimary.every((t) => catalogTokenMatchesHaystack(t, h, n))
+        );
+    }
+    if (hits.length === 0 && tokensPrimary.length >= 2) {
+        const meaningful = tokensPrimary.filter((t) => t.length >= 3);
+        if (meaningful.length >= 2) {
+            const need = Math.max(2, Math.ceil(meaningful.length * 0.51));
+            hits = pool
+                .map(({ p, n, h }) => ({
+                    p,
+                    n,
+                    h,
+                    score: meaningful.reduce(
+                        (acc, t) => acc + (catalogTokenMatchesHaystack(t, h, n) ? 1 : 0),
+                        0
+                    ),
+                }))
+                .filter((x) => x.score >= need)
+                .sort(
+                    (a, b) =>
+                        b.score - a.score || String(a.p.name).localeCompare(String(b.p.name), 'ru')
+                );
+        }
     }
     if (hits.length === 0) return [];
 
@@ -459,10 +520,34 @@ function findBestCatalogMatch(rawQuery, inStockProducts) {
     if (hits.length === 0 && primary !== q) {
         hits = pool.filter(({ n, h }) => h.includes(q) || n.includes(q));
     }
-    if (hits.length === 0) {
-        const tokens = catalogQueryTokens(primary);
-        if (tokens.length === 0) return null;
-        hits = pool.filter(({ n, h }) => tokens.every((t) => h.includes(t) || n.includes(t)));
+    const tokensPrimaryBest = catalogQueryTokens(primary);
+    if (hits.length === 0 && tokensPrimaryBest.length > 0) {
+        hits = pool.filter(({ n, h }) =>
+            tokensPrimaryBest.every((t) => catalogTokenMatchesHaystack(t, h, n))
+        );
+    }
+    if (hits.length === 0 && tokensPrimaryBest.length >= 2) {
+        const meaningful = tokensPrimaryBest.filter((t) => t.length >= 3);
+        if (meaningful.length >= 2) {
+            const need = Math.max(2, Math.ceil(meaningful.length * 0.51));
+            hits = pool
+                .map(({ p, n, h }) => ({
+                    p,
+                    n,
+                    h,
+                    score: meaningful.reduce(
+                        (acc, t) => acc + (catalogTokenMatchesHaystack(t, h, n) ? 1 : 0),
+                        0
+                    ),
+                }))
+                .filter((x) => x.score >= need)
+                .sort(
+                    (a, b) =>
+                        b.score - a.score ||
+                        a.n.length - b.n.length ||
+                        String(a.p.name).localeCompare(String(b.p.name), 'ru')
+                );
+        }
     }
     if (hits.length === 0) return null;
 

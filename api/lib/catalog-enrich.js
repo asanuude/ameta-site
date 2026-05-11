@@ -9,6 +9,7 @@ function normalizeCatalogToken(s) {
         .replace(/ё/g, 'е')
         .replace(/(\d)\s*x(?=\s|$|[^\wа-яё])/gi, '$1х')
         .replace(/[-–—_/]+/g, ' ')
+        .replace(/[()[\],.;:]+/g, ' ')
         .replace(/\s+/g, ' ')
         .trim();
 }
