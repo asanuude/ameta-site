@@ -1,5 +1,6 @@
 /**
  * GET — проверка, что вебхук счёта и организация продавца заданы в Vercel (без раскрытия секретов).
+ * webhookPathKind: direct_1c_http_service (/hs/agent/ameta/invoice) | bridge_proxy (/bridge/ameta/invoice) | other.
  */
 export default function handler(req, res) {
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -13,22 +14,37 @@ export default function handler(req, res) {
     const rawUrl = (process.env.ONEC_INVOICE_WEBHOOK_URL || '').trim();
     const hasSecret = !!(process.env.ONEC_INVOICE_WEBHOOK_SECRET || '').trim();
     const org = (process.env.AMETA_1C_ORGANIZATION_NAME || '').trim();
+    const contract = (process.env.AMETA_1C_CONTRACT_NAME || '').trim();
     let host = null;
-    let pathOk = null;
+    let pathKind = 'unknown';
+    let pathOk = false;
     try {
         const u = new URL(rawUrl);
         host = u.hostname || null;
-        pathOk = /\/hs\/agent\/ameta\/invoice\/?$/i.test(u.pathname || '');
+        const p = u.pathname || '';
+        if (/\/hs\/agent\/ameta\/invoice\/?$/i.test(p)) {
+            pathKind = 'direct_1c_http_service';
+            pathOk = true;
+        } else if (/\/bridge\/ameta\/invoice\/?$/i.test(p)) {
+            pathKind = 'bridge_proxy';
+            pathOk = true;
+        } else {
+            pathKind = 'other';
+            pathOk = false;
+        }
     } catch {
         host = null;
+        pathKind = 'invalid_url';
     }
 
     return res.status(200).json({
         webhookUrlConfigured: !!rawUrl,
         webhookSecretConfigured: hasSecret,
         webhookHost: host,
+        webhookPathKind: pathKind,
         webhookPathLooksLikeAmetaInvoice: pathOk,
         sellerOrganizationConfigured: !!org,
+        contractNameConfigured: !!contract,
         readyForInvoiceCall: !!(rawUrl && hasSecret && org),
     });
 }
