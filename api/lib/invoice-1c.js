@@ -128,10 +128,21 @@ export async function sendInvoiceRequestTo1C({ sessionId, items, counterparty, c
         }
 
         if (!response.ok) {
+            const detail =
+                typeof data.detail === 'string'
+                    ? data.detail
+                    : data.detail != null
+                      ? JSON.stringify(data.detail)
+                      : '';
             return {
                 configured: true,
                 ok: false,
-                error: data.error || data.message || text || `HTTP ${response.status}`,
+                error:
+                    data.error ||
+                    data.message ||
+                    detail ||
+                    text ||
+                    `HTTP ${response.status}`,
             };
         }
 
