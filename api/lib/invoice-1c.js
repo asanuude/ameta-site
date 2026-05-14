@@ -26,10 +26,20 @@
  * Идентификатор номенклатуры: nomenclatureId = поле id из catalog.json (Ид товара CommerceML).
  */
 
+/** Убирает типичный мусор при вставке секрета в Vercel (переносы строк, BOM, обрамляющие кавычки). */
+function normalizeInvoiceSecret(raw) {
+    return String(raw || '')
+        .replace(/^\uFEFF/, '')
+        .replace(/\u00A0/g, ' ')
+        .replace(/\r\n|\r|\n/g, '')
+        .trim()
+        .replace(/^["'`]+|["'`]+$/g, '');
+}
+
 export async function sendInvoiceRequestTo1C({ sessionId, items, counterparty, chatTranscript }) {
     const defaultOrganization = 'Гоблина Людмила Михайловна ИП';
     const url = (process.env.ONEC_INVOICE_WEBHOOK_URL || '').trim();
-    const secret = (process.env.ONEC_INVOICE_WEBHOOK_SECRET || '').trim();
+    const secret = normalizeInvoiceSecret(process.env.ONEC_INVOICE_WEBHOOK_SECRET || '');
     if (!url || !secret) {
         return { configured: false };
     }
@@ -134,15 +144,20 @@ export async function sendInvoiceRequestTo1C({ sessionId, items, counterparty, c
                     : data.detail != null
                       ? JSON.stringify(data.detail)
                       : '';
+            const baseErr =
+                data.error ||
+                data.message ||
+                detail ||
+                text ||
+                `HTTP ${response.status}`;
+            const hint401 =
+                response.status === 401
+                    ? ' Сверьте ONEC_INVOICE_WEBHOOK_SECRET (Production) с токеном, который принимает /bridge/ или константа API_AMetaInvoiceWebhookSecret на прод-ИБ за 1c.ameta.online; после правки — Redeploy. Проверка: curl POST с тем же Bearer с вашего ПК.'
+                    : '';
             return {
                 configured: true,
                 ok: false,
-                error:
-                    data.error ||
-                    data.message ||
-                    detail ||
-                    text ||
-                    `HTTP ${response.status}`,
+                error: baseErr + hint401,
             };
         }
 
