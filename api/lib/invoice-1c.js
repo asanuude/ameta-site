@@ -28,7 +28,6 @@
 
 export async function sendInvoiceRequestTo1C({ sessionId, items, counterparty, chatTranscript }) {
     const defaultOrganization = 'Гоблина Людмила Михайловна ИП';
-    const defaultContract = 'для вебсервиса';
     const url = (process.env.ONEC_INVOICE_WEBHOOK_URL || '').trim();
     const secret = (process.env.ONEC_INVOICE_WEBHOOK_SECRET || '').trim();
     if (!url || !secret) {
@@ -50,8 +49,12 @@ export async function sendInvoiceRequestTo1C({ sessionId, items, counterparty, c
             error: 'Задайте AMETA_1C_ORGANIZATION_NAME (наименование организации-продавца в 1С, как в справочнике Организации).',
         };
     }
+    /** Имя договора/соглашения в 1С — только из env. Раньше подставлялся текст «для вебсервиса» и давал ошибку «Соглашение не найдено». */
     const rawContract = (process.env.AMETA_1C_CONTRACT_NAME || '').trim();
-    const contract = !rawContract || rawContract.includes('?') ? defaultContract : rawContract;
+    const contract =
+        rawContract && !rawContract.includes('?') && !/^для\s+вебсервиса$/i.test(rawContract)
+            ? rawContract
+            : '';
     const postDocument =
         String(process.env.AMETA_1C_POST_ORDER || '').toLowerCase() === 'true' ||
         String(process.env.AMETA_1C_POST_ORDER || '').trim() === '1';
